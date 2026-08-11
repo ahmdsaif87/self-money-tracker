@@ -621,7 +621,7 @@ class _DraftTransactionCardState extends State<_DraftTransactionCard> {
     final dark = ThemeStore.instance.isDarkMode;
     final type = widget.data['tx_type'] as String? ?? 'expense';
     final amount = (widget.data['amount'] as num?)?.toDouble() ?? 0.0;
-    final catName = widget.data['category_name_fallback'] as String? ?? 'Unknown';
+    final catName = widget.data['category_name_fallback'] as String?;
     
     final fmt = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
 
@@ -661,13 +661,14 @@ class _DraftTransactionCardState extends State<_DraftTransactionCard> {
               color: ThemeColors.textPrimary(dark),
             ),
           ),
-          Text(
-            catName,
-            style: TextStyle(
-              fontSize: 12,
-              color: ThemeColors.textSecondary(dark),
+          if (catName != null && type != 'transfer')
+            Text(
+              catName,
+              style: TextStyle(
+                fontSize: 12,
+                color: ThemeColors.textSecondary(dark),
+              ),
             ),
-          ),
           if (widget.data['note'] != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),

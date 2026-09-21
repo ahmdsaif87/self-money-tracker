@@ -182,7 +182,7 @@ class BackupService {
         final map = <String, dynamic>{};
         for (var j = 0; j < headers.length && j < row.length; j++) {
           final cell = row[j];
-          map[headers[j]] = cell?.value;
+          map[headers[j]] = _fromCellValue(cell?.value);
         }
         out.add(map);
       }
@@ -194,5 +194,14 @@ class BackupService {
       categories: rowsOf('Categories'),
       transactions: rowsOf('Transactions'),
     );
+  }
+
+  static dynamic _fromCellValue(CellValue? v) {
+    if (v == null) return null;
+    if (v is TextCellValue) return v.value.toString();
+    if (v is IntCellValue) return v.value;
+    if (v is DoubleCellValue) return v.value;
+    if (v is BoolCellValue) return v.value ? 1 : 0;
+    return v.toString();
   }
 }

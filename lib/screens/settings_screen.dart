@@ -1,21 +1,19 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:image_picker/image_picker.dart';
-import '../db/database.dart';
 import '../stores/account_store.dart';
+import '../stores/category_store.dart';
 import '../stores/profile_store.dart';
 import '../stores/theme_store.dart';
-import '../stores/chat_store.dart';
-import '../stores/ai_queue_store.dart';
 import '../models/models.dart';
 import '../theme/theme.dart';
 import '../components/app_icon.dart';
-import '../components/sheet_drag.dart' show hexA;
+import '../components/sheet_drag.dart' show hexColor;
 import '../services/ai_key.dart';
-import '../services/backup_service.dart';
 import '../services/export_import_service.dart';
-import '../services/gemini_service.dart';
 import '../utils/amount.dart';
+import 'categories_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -25,1448 +23,800 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final _profileNameCtrl = TextEditingController();
+  final _apiKeyCtrl = TextEditingController();
+  bool _hasApiKey = false;
   bool _isExporting = false;
   bool _isImporting = false;
-  bool _syncingQueue = false;
-  String? _lastExportAt;
-  String? _lastExportSummary;
-  bool _showKeyInput = false;
-  final _keyController = TextEditingController();
-  bool _hasKey = false;
-
-  // Import preview
-  BackupPreview? _importPreview;
-  String? _importFileBase64;
-
-  // Profile state
-  final _profileNameController = TextEditingController();
-  String? _profilePhoto;
-
-  // Add/edit account sheet state
-  Account? _editingAccount;
-  final _newAccNameController = TextEditingController();
-  final _newAccBalanceController = TextEditingController();
-  String _newAccType = 'cash';
-
-  static const _accountTypes = [
-    (key: 'cash', label: 'Tunai', icon: 'wallet'),
-    (key: 'bank', label: 'Bank', icon: 'banknote'),
-    (key: 'ewallet', label: 'E-Wallet', icon: 'credit-card'),
-  ];
 
   @override
   void initState() {
     super.initState();
-    _loadKeyState();
-    _profileNameController.text = ProfileStore.instance.name;
-    ProfileStore.instance.addListener(_onProfileChanged);
+    _profileNameCtrl.text = ProfileStore.instance.name;
+    _checkApiKey();
   }
 
   @override
   void dispose() {
-    ProfileStore.instance.removeListener(_onProfileChanged);
-    _keyController.dispose();
-    _profileNameController.dispose();
-    _newAccNameController.dispose();
-    _newAccBalanceController.dispose();
+    _profileNameCtrl.dispose();
+    _apiKeyCtrl.dispose();
     super.dispose();
   }
 
-  void _onProfileChanged() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _loadKeyState() async {
+  Future<void> _checkApiKey() async {
     final key = await AIKeyService.getApiKey();
-    if (mounted) setState(() => _hasKey = key != null && key.isNotEmpty);
+    if (mounted) setState(() => _hasApiKey = key != null && key.isNotEmpty);
   }
 
-  void _showAlert(String title, String msg) {
-    showDialog(
+  Future<void> _saveProfileName() async {
+    await ProfileStore.instance.save(_profileNameCtrl.text.trim(), ProfileStore.instance.photoUri);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile name updated')),
+      );
+    }
+  }
+
+  Future<void> _pickProfilePhoto() async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      await ProfileStore.instance.save(ProfileStore.instance.name, image.path);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _saveApiKey() async {
+    final key = _apiKeyCtrl.text.trim();
+    if (key.isNotEmpty) {
+      await AIKeyService.setApiKey(key);
+      _apiKeyCtrl.clear();
+      await _checkApiKey();
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('API Key saved successfully')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showApiKeyDialog() async {
+    final dark = ThemeStore.instance.isDarkMode;
+    final bg = const Color(0xFF1C1C1E);
+    final textPrimary = ThemeColors.textPrimary(dark);
+    final textMuted = ThemeColors.textMuted(dark);
+    final accent = ThemeColors.accentExpense(dark);
+
+    await showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(msg),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 16,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: dark ? Colors.white24 : Colors.black26,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: AppIcon('sparkles', size: 20, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Gemini AI API Key',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, color: textMuted),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Enter your Gemini API Key from Google AI Studio to activate the AI Financial Assistant.',
+              style: TextStyle(fontSize: 13, color: textMuted, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _apiKeyCtrl,
+              style: TextStyle(color: textPrimary, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                labelStyle: TextStyle(color: textMuted, fontSize: 13),
+                hintText: 'AIzaSy...',
+                hintStyle: TextStyle(color: textMuted.withValues(alpha: 0.5)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: accent, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _saveApiKey,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Text('Save Key', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+            if (_hasApiKey) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () async {
+                  await AIKeyService.clearApiKey();
+                  await _checkApiKey();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Remove Key', style: TextStyle(fontSize: 13)),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
 
-  // ---- API Key ----
-  Future<void> _handleSaveKey() async {
-    final key = _keyController.text.trim();
-    if (key.isEmpty) return;
-    await AIKeyService.setApiKey(key);
-    _keyController.clear();
-    if (mounted) {
-      setState(() {
-        _showKeyInput = false;
-        _hasKey = true;
-      });
-    }
+  Future<void> _showAIPersonaDialog() async {
+    final dark = ThemeStore.instance.isDarkMode;
+    final bg = const Color(0xFF1C1C1E);
+    final textPrimary = ThemeColors.textPrimary(dark);
+    final textMuted = ThemeColors.textMuted(dark);
+    final accent = ThemeColors.accentExpense(dark);
+
+    String selectedPersona = ProfileStore.instance.aiPersona;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Container(
+          decoration: BoxDecoration(
+            color: dark ? bg : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: dark ? Colors.white24 : Colors.black26,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: AppIcon('user', size: 20, color: accent),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'AI Assistant Persona',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Choose how your AI Financial Assistant talks to you.',
+                style: TextStyle(fontSize: 13, color: textMuted, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              ...['professional', 'casual', 'strict'].map((persona) {
+                final isSelected = selectedPersona == persona;
+                String title = persona == 'strict' ? 'Strict & Firm' : (persona == 'casual' ? 'Casual & Friendly' : 'Professional');
+                String desc = persona == 'strict' 
+                    ? 'AI will be strict, direct, and won\'t hesitate to warn you if you overspend.' 
+                    : (persona == 'casual' 
+                        ? 'AI will talk like a close friend, using casual and relaxed language.' 
+                        : 'AI will act as a polite and formal bank advisor.');
+                return GestureDetector(
+                  onTap: () {
+                    setModalState(() => selectedPersona = persona);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isSelected ? accent.withValues(alpha: 0.1) : ThemeColors.secondaryCard(dark),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: isSelected ? accent : ThemeColors.border(dark)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textPrimary)),
+                              const SizedBox(height: 4),
+                              Text(desc, style: TextStyle(fontSize: 12, color: textMuted)),
+                            ],
+                          ),
+                        ),
+                        if (isSelected)
+                          Icon(Icons.check_circle, color: accent)
+                        else
+                          Icon(Icons.circle_outlined, color: textMuted),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  await ProfileStore.instance.savePersona(selectedPersona);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text('Save Selection', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  Future<void> _handleClearKey() async {
-    await AIKeyService.clearApiKey();
-    if (mounted) setState(() => _hasKey = false);
-  }
-
-  // ---- Export ----
   Future<void> _handleExport() async {
     if (_isExporting) return;
     setState(() => _isExporting = true);
     try {
       final data = await ExportImportService.generateXLSXData();
-      // Save to documents for user access
       final path = await ExportImportService.saveBackupFile(data.bytes);
       await ExportImportService.shareFile(data.bytes);
       if (mounted) {
-        setState(() {
-          _lastExportAt = DateTime.now().toIso8601String();
-          _lastExportSummary =
-              '${data.counts.accounts} akun · ${data.counts.categories} kategori · ${data.counts.transactions} transaksi';
-          _isExporting = false;
-        });
-        _showAlert(
-          'Cadangan Dibuat',
-          'File cadangan ${data.counts.accounts} akun, ${data.counts.categories} kategori, ${data.counts.transactions} transaksi${path != null ? '\nTersimpan di: $path' : ''}',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export successful${path != null ? ': $path' : ''}')),
         );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isExporting = false);
-        _showAlert('Gagal', 'Gagal membuat cadangan: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
     }
   }
 
-  Future<void> _handlePickImport() async {
-    final base64Str = await ExportImportService.pickBackupFileBase64();
-    if (base64Str == null) return;
-    final preview = BackupService.parseXLSXForPreview(base64Str);
-    if (!preview.valid) {
-      _showAlert('File Tidak Valid', preview.message);
-      return;
-    }
-    if (mounted) {
-      setState(() {
-        _importPreview = preview;
-        _importFileBase64 = base64Str;
-      });
-      _showImportPreviewSheet();
-    }
-  }
-
-  void _showImportPreviewSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: ThemeStore.instance.isDarkMode
-          ? const Color(0xFF1D1B19)
-          : const Color(0xFFFBF8F3),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      isScrollControlled: true,
-      builder: (_) => _buildImportPreviewSheet(),
-    );
-  }
-
-  Future<void> _confirmImport() async {
+  Future<void> _handleImport() async {
     if (_isImporting) return;
-    final fileToImport = _importFileBase64;
-    if (fileToImport == null || fileToImport.isEmpty) return;
     setState(() => _isImporting = true);
     try {
-      final result = await ExportImportService.importXLSXReplace(fileToImport);
-      if (mounted) {
-        setState(() {
-          _isImporting = false;
-          _importPreview = null;
-        });
-        Navigator.pop(context);
-        if (result.success) {
-          _showAlert('Restore Selesai', result.message);
-        } else {
-          _showAlert('Gagal Restore', result.message);
+      final base64Data = await ExportImportService.pickBackupFileBase64();
+      if (base64Data == null) {
+        setState(() => _isImporting = false);
+        return;
+      }
+
+      if (!mounted) return;
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Import Backup (.xlsx)?'),
+          content: const Text(
+            'This action will replace your current financial data with the backup contents. Are you sure you want to proceed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber.shade800,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Replace Data'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm == true) {
+        final result = await ExportImportService.importXLSXReplace(base64Data);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result.message),
+              backgroundColor: result.success ? Colors.green.shade700 : Colors.red.shade700,
+            ),
+          );
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _isImporting = false;
-          _importPreview = null;
-        });
-        Navigator.pop(context);
-        _showAlert('Gagal Restore', e.toString());
-      }
-    }
-  }
-
-  // ---- Offline queue ----
-  Future<void> _handleSyncQueue() async {
-    if (_syncingQueue) return;
-    setState(() => _syncingQueue = true);
-    try {
-      final processed = await GeminiService.syncPendingAIQueue();
-      await ChatStore.instance.reflectQueueState();
-      await AIQueueStore.instance.fetchQueue();
-      if (mounted) {
-        setState(() => _syncingQueue = false);
-        _showAlert(
-          'Antrean Diproses',
-          processed > 0
-              ? '$processed pertanyaan berhasil diproses.'
-              : 'Tidak ada pertanyaan yang menunggu diproses.',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import error: $e')),
         );
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _syncingQueue = false);
-        _showAlert('Gagal', 'Gagal memproses antrean: $e');
-      }
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
-  // ---- Reset ----
-  Future<void> _handleResetData() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Hapus Semua Data Lokal'),
-        content: const Text(
-          'Semua akun, kategori, transaksi, dan riwayat chat akan dihapus permanen. Lanjutkan?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Hapus', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    final db = DB.instance.db;
-    await db.delete('transactions');
-    await db.delete('categories');
-    await db.delete('accounts');
-    await db.delete('ai_queue');
-    await db.delete('chat_messages');
-    await AccountStore.instance.fetchAccounts();
-    await ChatStore.instance.load();
-    await AIQueueStore.instance.fetchQueue();
-    if (mounted) _showAlert('Selesai', 'Semua data lokal telah dihapus.');
-  }
-
-  // ---- Profile ----
-  Future<void> _handleSaveProfile() async {
-    await ProfileStore.instance.save(
-      _profileNameController.text.trim(),
-      _profilePhoto,
-    );
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _pickProfilePhoto() async {
-    try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 85,
-      );
-      if (picked == null) return;
-      if (mounted) setState(() => _profilePhoto = picked.path);
-    } catch (e) {
-      debugPrint('Pick photo error: $e');
-    }
-  }
-
-  void _openProfileSheet() {
-    _profileNameController.text = ProfileStore.instance.name;
-    _profilePhoto = ProfileStore.instance.photoUri;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: ThemeStore.instance.isDarkMode
-          ? const Color(0xFF1D1B19)
-          : const Color(0xFFFBF8F3),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      isScrollControlled: true,
-      builder: (_) => _buildProfileSheet(),
-    );
-  }
-
-  // ---- Account bottom sheet ----
-  void _openAddAcc() {
-    setState(() {
-      _editingAccount = null;
-      _newAccNameController.clear();
-      _newAccBalanceController.clear();
-      _newAccType = 'cash';
-    });
-    _showAccountSheet();
-  }
-
-  void _openEditAcc(Account acc) {
-    setState(() {
-      _editingAccount = acc;
-      _newAccNameController.text = acc.name;
-      _newAccBalanceController.text = acc.balance.round().toString();
-      _newAccType = acc.type;
-    });
-    _showAccountSheet();
-  }
-
-  void _showAccountSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: ThemeStore.instance.isDarkMode
-          ? const Color(0xFF1D1B19)
-          : const Color(0xFFFBF8F3),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      isScrollControlled: true,
-      builder: (_) => _buildAccountSheet(),
-    );
-  }
-
-  Future<void> _handleSaveAcc() async {
-    final name = _newAccNameController.text.trim();
-    if (name.isEmpty) {
-      _showAlert('Nama Diperlukan', 'Masukkan nama akun.');
-      return;
-    }
-    final balance = parseRawAmount(_newAccBalanceController.text);
-    if (_editingAccount != null) {
-      await AccountStore.instance.updateAccount(
-        _editingAccount!.id,
-        name: name,
-        type: _newAccType,
-        balance: balance,
-      );
-    } else {
-      final typeDef = _accountTypes.firstWhere(
-        (t) => t.key == _newAccType,
-        orElse: () => _accountTypes.first,
-      );
-      await AccountStore.instance.addAccount(
-        name: name,
-        type: _newAccType,
-        balance: balance,
-        color: typeDef.key == 'bank' ? '#7FA98B' : '#E06D53',
-        icon: typeDef.icon,
-      );
-    }
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _handleDeleteAcc(Account acc) async {
-    final txCount = await DB.instance.db.rawQuery(
-      'SELECT COUNT(*) as c FROM transactions WHERE account_id = ? OR to_account_id = ?',
-      [acc.id, acc.id],
-    );
-    final refs = (txCount.first['c'] as int?) ?? 0;
-    if (refs > 0) {
-      _showAlert(
-        'Tidak Bisa Dihapus',
-        'Akun punya $refs transaksi — hapus transaksinya dulu.',
-      );
-      return;
-    }
-    if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Hapus Akun ${acc.name}?'),
-        content: const Text('Akun ini akan dihapus permanen.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Hapus', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await AccountStore.instance.deleteAccount(acc.id);
-      if (mounted) Navigator.pop(context);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Future<void> _showAccountDialog([Account? acc]) async {
     final dark = ThemeStore.instance.isDarkMode;
-    final accounts = AccountStore.instance.accounts;
-    final queue = AIQueueStore.instance.queue;
-    final pendingCount = queue.where((q) => q.status == 'pending').length;
-    final t = _T(dark);
+    final bg = ThemeColors.card(dark);
+    final textPrimary = ThemeColors.textPrimary(dark);
+    final textMuted = ThemeColors.textMuted(dark);
+    final accent = ThemeColors.accentExpense(dark);
 
-    return Scaffold(
-      backgroundColor: ThemeColors.bg(dark),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 120),
-              children: [
-                Text(
-                  'Pengaturan',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    color: t.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 20),
+    final nameCtrl = TextEditingController(text: acc?.name ?? '');
+    final balanceCtrl = TextEditingController(
+      text: acc != null ? formatWithDots(acc.balance.round().toString()) : '0',
+    );
+    String type = acc?.type ?? 'cash';
+    String icon = acc?.icon ?? (type == 'bank' ? 'banknote' : (type == 'ewallet' ? 'credit-card' : 'wallet'));
+    String color = acc?.color ?? (type == 'bank' ? '#7FA98B' : '#E06D53');
 
-                // Profile card
-                _Card(
-                  dark: dark,
-                  child: InkWell(
-                    onTap: _openProfileSheet,
-                    child: Row(
+    const accountTypes = [
+      (key: 'cash', label: 'Cash', icon: 'wallet'),
+      (key: 'bank', label: 'Bank', icon: 'banknote'),
+      (key: 'ewallet', label: 'E-Wallet', icon: 'credit-card'),
+      (key: 'savings', label: 'Savings', icon: 'piggy-bank'),
+    ];
+
+    const colorOptions = ['#E06D53', '#7FA98B', '#E0A75A', '#4A90E2', '#8E44AD'];
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Container(
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: ThemeColors.border(dark),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: ThemeColors.accentExpense(
-                              dark,
-                            ).withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
-                            image: ProfileStore.instance.photoUri != null
-                                ? DecorationImage(
-                                    image: FileImage(
-                                      File(ProfileStore.instance.photoUri!),
-                                    ),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
-                          ),
-                          child: ProfileStore.instance.photoUri == null
-                              ? AppIcon(
-                                  'user',
-                                  size: 24,
-                                  color: ThemeColors.accentExpense(dark),
-                                )
-                              : null,
+                        Text(
+                          acc == null ? 'Add Account' : 'Edit Account',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ProfileStore.instance.name.isEmpty
-                                    ? 'Nama Anda'
-                                    : ProfileStore.instance.name,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: t.textPrimary,
-                                ),
-                              ),
-                              Text(
-                                'Ubah profil',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: t.textMuted,
-                                ),
-                              ),
-                            ],
-                          ),
+                        IconButton(
+                          icon: Icon(Icons.close, size: 20, color: textMuted),
+                          onPressed: () => Navigator.pop(ctx),
                         ),
-                        AppIcon('chevron-right', size: 18, color: t.textMuted),
                       ],
                     ),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
-                // Dark mode
-                _Card(
-                  dark: dark,
-                  child: Row(
-                    children: [
-                      AppIcon(
-                        dark ? 'moon' : 'sun',
-                        size: 20,
-                        color: ThemeColors.accentExpense(dark),
+                    // Account Name Input
+                    TextField(
+                      controller: nameCtrl,
+                      style: TextStyle(color: textPrimary, fontSize: 15),
+                      decoration: InputDecoration(
+                        labelText: 'Account Name',
+                        labelStyle: TextStyle(color: textMuted, fontSize: 13),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(
-                          'Mode Gelap',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: t.textPrimary,
-                          ),
-                        ),
-                      ),
-                      Switch(
-                        value: dark,
-                        onChanged: (_) => ThemeStore.instance.toggleDarkMode(),
-                        activeThumbColor: ThemeColors.accentExpense(dark),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                    ),
+                    const SizedBox(height: 14),
 
-                // AI API key
-                _Card(
-                  dark: dark,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          AppIcon(
-                            'sparkles',
-                            size: 20,
-                            color: ThemeColors.accentExpense(dark),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Text(
-                              'Asisten AI',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: t.textPrimary,
-                              ),
-                            ),
-                          ),
-                        ],
+                    // Initial Balance Input with thousand separator dot formatting
+                    TextField(
+                      controller: balanceCtrl,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                      onChanged: (v) {
+                        final formatted = formatWithDots(v);
+                        if (formatted != v) {
+                          balanceCtrl.value = TextEditingValue(
+                            text: formatted,
+                            selection: TextSelection.collapsed(offset: formatted.length),
+                          );
+                        }
+                      },
+                      decoration: InputDecoration(
+                        prefixText: 'Rp ',
+                        prefixStyle: TextStyle(color: accent, fontSize: 18, fontWeight: FontWeight.bold),
+                        labelText: 'Initial Balance (Rp)',
+                        labelStyle: TextStyle(color: textMuted, fontSize: 13),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Gemini API key digunakan untuk menjawab pertanyaan tentang keuangan Anda.',
-                        style: TextStyle(fontSize: 12, color: t.textMuted),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_showKeyInput) ...[
-                        TextField(
-                          controller: _keyController,
-                          obscureText: true,
-                          style: TextStyle(color: t.textPrimary),
-                          decoration: InputDecoration(
-                            hintText: 'Tempel API key...',
-                            hintStyle: TextStyle(color: t.textMuted),
-                            filled: true,
-                            fillColor: t.secondaryCard,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: _handleSaveKey,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: ThemeColors.fillExpense,
-                                ),
-                                child: const Text(
-                                  'Simpan',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            OutlinedButton(
-                              onPressed: () => setState(() {
-                                _showKeyInput = false;
-                                _keyController.clear();
-                              }),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: t.textSecondary,
-                              ),
-                              child: const Text('Batal'),
-                            ),
-                          ],
-                        ),
-                      ] else ...[
-                        if (_hasKey)
-                          Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () =>
-                                      setState(() => _showKeyInput = true),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: hexA('#E06D53', 0.15),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        'Ganti Key',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: t.expenseAccent,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: _handleClearKey,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: t.dangerText),
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        'Hapus Key',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: t.dangerText,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          )
-                        else
-                          GestureDetector(
-                            onTap: () => setState(() => _showKeyInput = true),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: ThemeColors.fillExpense,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  'Masukkan API Key',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                    ),
+                    const SizedBox(height: 16),
 
-                // Manage accounts
-                _Card(
-                  dark: dark,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Kelola Akun (${accounts.length})',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: t.textPrimary,
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: _openAddAcc,
-                            child: Text(
-                              '+ Tambah Akun',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                color: t.expenseAccent,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      ...accounts.map(
-                        (acc) => InkWell(
-                          onTap: () => _openEditAcc(acc),
+                    // Account Type selector chips
+                    Text('Account Type', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textMuted)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: accountTypes.map((item) {
+                        final selected = type == item.key;
+                        return GestureDetector(
+                          onTap: () {
+                            setModalState(() {
+                              type = item.key;
+                              icon = item.icon;
+                              if (type == 'bank') color = '#7FA98B';
+                              if (type == 'savings') color = '#8E44AD';
+                            });
+                          },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(color: t.border),
-                              ),
+                              color: selected ? accent.withValues(alpha: 0.15) : ThemeColors.secondaryCard(dark),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: selected ? accent : ThemeColors.border(dark)),
                             ),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
+                                AppIcon(item.icon, size: 16, color: selected ? accent : textMuted),
+                                const SizedBox(width: 6),
                                 Text(
-                                  acc.name,
+                                  item.label,
                                   style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: t.textSecondary,
-                                  ),
-                                ),
-                                Text(
-                                  formatCurrency(acc.balance),
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w800,
-                                    color: t.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                                    color: selected ? accent : textPrimary,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
 
-                // Backup & restore
-                _Card(
-                  dark: dark,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Cadangan & Restore (XLSX)',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: t.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Satu file cadangan berisi semua akun, kategori, dan transaksi. Restore akan mengganti semua data.',
-                        style: TextStyle(fontSize: 12, color: t.textMuted),
-                      ),
-                      const SizedBox(height: 12),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: AppIcon(
-                          'download',
-                          size: 20,
-                          color: t.incomeAccent,
-                        ),
-                        title: Text(
-                          _isExporting
-                              ? 'Menyiapkan cadangan...'
-                              : 'Export Database (.xlsx)',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: t.textPrimary,
-                          ),
-                        ),
-                        onTap: _handleExport,
-                      ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: AppIcon(
-                          'upload',
-                          size: 20,
-                          color: t.expenseAccent,
-                        ),
-                        title: Text(
-                          'Restore dari File .xlsx',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: t.textPrimary,
-                          ),
-                        ),
-                        onTap: _handlePickImport,
-                      ),
-                      if (_lastExportAt != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Cadangan terakhir: ${_lastExportAt!.split('T').first}'
-                            '${_lastExportSummary != null ? ' · $_lastExportSummary' : ''}',
-                            style: TextStyle(fontSize: 11, color: t.textMuted),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Offline queue
-                _Card(
-                  dark: dark,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Status Antrean Offline',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: t.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Pertanyaan AI: ${queue.length} ($pendingCount menunggu)',
-                        style: TextStyle(fontSize: 13, color: t.textSecondary),
-                      ),
-                      if (queue.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        GestureDetector(
-                          onTap: _syncingQueue ? null : _handleSyncQueue,
+                    // Color theme options
+                    Text('Color Badge', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textMuted)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: colorOptions.map((cHex) {
+                        final cColor = hexColor(cHex);
+                        final selected = color.toUpperCase() == cHex.toUpperCase();
+                        return GestureDetector(
+                          onTap: () => setModalState(() => color = cHex),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            width: 32,
+                            height: 32,
+                            margin: const EdgeInsets.only(right: 10),
                             decoration: BoxDecoration(
-                              color: _syncingQueue
-                                  ? t.secondaryCard
-                                  : ThemeColors.fillExpense,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Text(
-                                _syncingQueue
-                                    ? 'Memproses...'
-                                    : 'Proses Antrean Sekarang',
-                                style: TextStyle(
-                                  color: _syncingQueue
-                                      ? t.textSecondary
-                                      : Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
+                              color: cColor,
+                              shape: BoxShape.circle,
+                              border: selected ? Border.all(color: textPrimary, width: 2.5) : null,
                             ),
                           ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Action buttons
+                    ElevatedButton(
+                      onPressed: () async {
+                        final name = nameCtrl.text.trim();
+                        final balance = parseRawAmount(balanceCtrl.text);
+                        if (name.isNotEmpty) {
+                          if (acc != null) {
+                            await AccountStore.instance.updateAccount(
+                              acc.id,
+                              name: name,
+                              balance: balance,
+                              type: type,
+                              icon: icon,
+                              color: color,
+                            );
+                          } else {
+                            await AccountStore.instance.addAccount(
+                              name: name,
+                              balance: balance,
+                              type: type,
+                              icon: icon,
+                              color: color,
+                            );
+                          }
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text(
+                        acc == null ? 'Create Account' : 'Save Account',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    if (acc != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () async {
+                          await AccountStore.instance.deleteAccount(acc.id);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Delete Account', style: TextStyle(fontSize: 13)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        ThemeStore.instance,
+        AccountStore.instance,
+        CategoryStore.instance,
+      ]),
+      builder: (context, _) {
+        final dark = ThemeStore.instance.isDarkMode;
+        final textPrimary = ThemeColors.textPrimary(dark);
+        final photoUri = ProfileStore.instance.photoUri;
+        final accounts = AccountStore.instance.accounts;
+        final categories = CategoryStore.instance.categories;
+
+        return Scaffold(
+          backgroundColor: ThemeColors.bg(dark),
+          appBar: AppBar(
+            title: Text('Settings', style: TextStyle(color: textPrimary, fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+          ),
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+              children: [
+                // Profile Card
+                Card(
+                  color: ThemeColors.card(dark),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        GestureDetector(
+                          onTap: _pickProfilePhoto,
+                          child: CircleAvatar(
+                            radius: 28,
+                            backgroundColor: ThemeColors.expense.withValues(alpha: 0.15),
+                            backgroundImage: photoUri != null ? FileImage(File(photoUri)) : null,
+                            child: photoUri == null ? const AppIcon('user', size: 28, color: ThemeColors.expense) : null,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextField(
+                            controller: _profileNameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'User Name',
+                              border: InputBorder.none,
+                            ),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary),
+                            onSubmitted: (_) => _saveProfileName(),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.check),
+                          onPressed: _saveProfileName,
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // Danger zone
-                GestureDetector(
-                  onTap: _handleResetData,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: ThemeColors.dangerSurface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0x40B84C34)),
-                    ),
-                    child: Center(
-                      child: Text(
-                        'Hapus Semua Data Lokal',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: t.dangerText,
-                        ),
-                      ),
-                    ),
+                // Theme Settings
+                Card(
+                  color: ThemeColors.card(dark),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: SwitchListTile(
+                    title: Text('Dark Mode', style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600)),
+                    secondary: const AppIcon('moon', size: 22, color: ThemeColors.expense),
+                    value: dark,
+                    onChanged: (val) => ThemeStore.instance.toggleDarkMode(),
                   ),
                 ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+                const SizedBox(height: 16),
 
-  // ============ Bottom Sheet: Tambah/Ubah Akun ============
-  Widget _buildAccountSheet() {
-    final dark = ThemeStore.instance.isDarkMode;
-    final t = _T(dark);
-    final editing = _editingAccount;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: t.border,
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                editing != null ? 'Ubah Akun' : 'Tambah Akun',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: t.textPrimary,
-                ),
-              ),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: AppIcon('x', size: 20, color: t.textPrimary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Nama Akun',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: t.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _newAccNameController,
-            style: TextStyle(color: t.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'contoh: Dompet, Bank BCA, GoPay',
-              hintStyle: TextStyle(color: t.textMuted),
-              filled: true,
-              fillColor: t.secondaryCard,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            editing != null ? 'Saldo Akun (IDR)' : 'Saldo Awal (IDR)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: t.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _newAccBalanceController,
-            keyboardType: TextInputType.number,
-            onChanged: (v) {
-              final formatted = formatWithDots(v);
-              if (formatted != v) {
-                _newAccBalanceController.value = TextEditingValue(
-                  text: formatted,
-                  selection: TextSelection.collapsed(offset: formatted.length),
-                );
-              }
-            },
-            style: TextStyle(color: t.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'contoh: 1.500.000',
-              hintStyle: TextStyle(color: t.textMuted),
-              filled: true,
-              fillColor: t.secondaryCard,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Jenis Akun',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: t.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _accountTypes.map((at) {
-              final selected = _newAccType == at.key;
-              return GestureDetector(
-                onTap: () => setState(() {
-                  _newAccType = at.key;
-                }),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: selected ? t.expenseAccent : t.border,
+                // Accounts Header & Section
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Financial Accounts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
+                    TextButton.icon(
+                      onPressed: () => _showAccountDialog(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add'),
                     ),
-                    color: selected ? hexA('#E06D53', 0.1) : t.secondaryCard,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppIcon(
-                        at.icon,
-                        size: 16,
-                        color: selected ? t.expenseAccent : t.textMuted,
+                  ],
+                ),
+                ...accounts.map(
+                  (acc) => Card(
+                    color: ThemeColors.card(dark),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: hexColor(acc.color).withValues(alpha: 0.15),
+                        child: AppIcon(acc.icon, size: 20, color: hexColor(acc.color)),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        at.label,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: selected ? t.expenseAccent : t.textSecondary,
+                      title: Text(acc.name, style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)),
+                      subtitle: Text(formatCurrency(acc.balance)),
+                      trailing: const Icon(Icons.edit, size: 18),
+                      onTap: () => _showAccountDialog(acc),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Services & Data Backup Section
+                Text('Services & Preferences', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
+                const SizedBox(height: 8),
+                Card(
+                  color: ThemeColors.card(dark),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: const AppIcon('tag', size: 22, color: ThemeColors.income),
+                        title: Text('Manage Categories', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: Text(
+                          '${categories.where((c) => c.type == 'expense').length} Expense, ${categories.where((c) => c.type == 'income').length} Income categories',
                         ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.push(
+                          context,
+                          CupertinoPageRoute(builder: (_) => const CategoriesScreen()),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const AppIcon('sparkles', size: 22, color: ThemeColors.expense),
+                        title: Text('Gemini AI Key', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: Text(_hasApiKey ? 'Connected' : 'Not configured'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _showApiKeyDialog,
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: AppIcon('user', size: 22, color: ThemeColors.accentExpense(false)),
+                        title: Text('AI Assistant Persona', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: Text(
+                          ProfileStore.instance.aiPersona == 'strict' 
+                              ? 'Strict & Firm' 
+                              : ProfileStore.instance.aiPersona == 'casual' 
+                                  ? 'Casual & Friendly' 
+                                  : 'Professional',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _showAIPersonaDialog,
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const AppIcon('file-text', size: 22, color: ThemeColors.income),
+                        title: Text('Export Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: const Text('Save or share your transaction records'),
+                        trailing: _isExporting
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.share, size: 18),
+                        onTap: _handleExport,
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const AppIcon('inbox', size: 22, color: ThemeColors.warningDefault),
+                        title: Text('Import Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: const Text('Restore financial records from backup file'),
+                        trailing: _isImporting
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.file_upload_outlined, size: 18),
+                        onTap: _handleImport,
                       ),
                     ],
                   ),
                 ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _handleSaveAcc,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ThemeColors.fillExpense,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(
-              editing != null ? 'Simpan Perubahan' : 'Simpan Akun',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          if (editing != null) ...[
-            const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: () => _handleDeleteAcc(editing),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: t.dangerText,
-                side: BorderSide(color: t.dangerText),
-                backgroundColor: dark
-                    ? const Color(0x1AB84C34)
-                    : const Color(0xFFF5E7E2),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              child: const Text(
-                'Hapus Akun',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Batal',
-              style: TextStyle(
-                color: t.textSecondary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============ Bottom Sheet: Ubah Profil ============
-  Widget _buildProfileSheet() {
-    final dark = ThemeStore.instance.isDarkMode;
-    final t = _T(dark);
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: t.border,
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Ubah Profil',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: t.textPrimary,
-                ),
-              ),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: AppIcon('x', size: 20, color: t.textPrimary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          // Avatar + pick photo
-          Center(
-            child: GestureDetector(
-              onTap: _pickProfilePhoto,
-              child: Stack(
-                children: [
-                  Container(
-                    width: 88,
-                    height: 88,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: t.secondaryCard,
-                      border: Border.all(color: t.border, width: 2),
-                      image: _profilePhoto != null
-                          ? DecorationImage(
-                              image: FileImage(File(_profilePhoto!)),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: _profilePhoto == null
-                        ? AppIcon('user', size: 40, color: t.textMuted)
-                        : null,
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFE06D53),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const AppIcon(
-                        'camera',
-                        size: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: GestureDetector(
-              onTap: _pickProfilePhoto,
-              child: Text(
-                'Pilih Foto',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: t.expenseAccent,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Nama',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: t.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _profileNameController,
-            style: TextStyle(color: t.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'Masukkan nama Anda',
-              hintStyle: TextStyle(color: t.textMuted),
-              filled: true,
-              fillColor: t.secondaryCard,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _handleSaveProfile,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ThemeColors.fillExpense,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: const Text(
-              'Simpan Profil',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Batal',
-              style: TextStyle(
-                color: t.textSecondary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============ Bottom Sheet: Preview Import ============
-  Widget _buildImportPreviewSheet() {
-    final dark = ThemeStore.instance.isDarkMode;
-    final t = _T(dark);
-    final preview = _importPreview;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: t.border,
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Periksa Cadangan',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: t.textPrimary,
-                ),
-              ),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: AppIcon('x', size: 20, color: t.textPrimary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _ImportCount(
-                label: 'Akun',
-                value: preview?.accounts ?? 0,
-                color: t.textPrimary,
-                dark: dark,
-              ),
-              _ImportCount(
-                label: 'Kategori',
-                value: preview?.categories ?? 0,
-                color: t.textPrimary,
-                dark: dark,
-              ),
-              _ImportCount(
-                label: 'Transaksi',
-                value: preview?.transactions ?? 0,
-                color: t.textPrimary,
-                dark: dark,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ThemeColors.dangerSurface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0x40B84C34)),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  'PERHATIAN',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: t.dangerText,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Restore akan MENGGANTI semua data saat ini dan tidak bisa dibatalkan.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: t.dangerText),
-                ),
               ],
             ),
           ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _isImporting ? null : _confirmImport,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ThemeColors.dangerDefault,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(
-              _isImporting ? 'Mengembalikan data...' : 'Ya, Ganti Semua Data',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Batal',
-              style: TextStyle(
-                color: t.textSecondary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ImportCount extends StatelessWidget {
-  final String label;
-  final int value;
-  final Color color;
-  final bool dark;
-
-  const _ImportCount({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.dark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          '$value',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11, color: ThemeColors.textMuted(dark)),
-        ),
-      ],
-    );
-  }
-}
-
-class _T {
-  final bool dark;
-  _T(this.dark);
-  Color get cardBg => ThemeColors.card(dark);
-  Color get secondaryCard => ThemeColors.secondaryCard(dark);
-  Color get border => ThemeColors.border(dark);
-  Color get textPrimary => ThemeColors.textPrimary(dark);
-  Color get textSecondary => ThemeColors.textSecondary(dark);
-  Color get textMuted => ThemeColors.textMuted(dark);
-  Color get incomeAccent => ThemeColors.accentIncome(dark);
-  Color get expenseAccent => ThemeColors.accentExpense(dark);
-  Color get warningAccent => ThemeColors.accentWarning(dark);
-  Color get dangerText =>
-      dark ? const Color(0xFFF0907A) : ThemeColors.dangerDefault;
-}
-
-class _Card extends StatelessWidget {
-  final Widget child;
-  final bool dark;
-
-  const _Card({required this.child, required this.dark});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: ThemeColors.card(dark),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: ThemeColors.border(dark)),
-      ),
-      child: child,
+        );
+      },
     );
   }
 }

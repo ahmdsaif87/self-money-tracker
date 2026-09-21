@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'dart:async' show unawaited;
 import 'db/database.dart';
 import 'stores/account_store.dart';
@@ -60,7 +61,6 @@ class _MoneyTrackerAppState extends State<MoneyTrackerApp> {
     if (mounted) setState(() => _ready = true);
   }
 
-  /// Process AI questions that were queued while offline.
   Future<void> _syncPendingAIQueue() async {
     try {
       await GeminiService.syncPendingAIQueue();
@@ -95,7 +95,6 @@ class _MoneyTrackerAppState extends State<MoneyTrackerApp> {
                 TargetPlatform.windows: AppPageTransitionsBuilder(),
               },
             ),
-            fontFamily: null,
           ),
           darkTheme: ThemeData(
             brightness: Brightness.dark,
@@ -130,7 +129,6 @@ class LoadingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final bg = ThemeColors.bg(dark);
-    final accent = ThemeColors.accentExpense(dark);
     return Scaffold(
       backgroundColor: bg,
       body: Center(
@@ -141,13 +139,13 @@ class LoadingScreen extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.15),
+                color: ThemeColors.expense.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: const AppIcon(
                 'wallet',
                 size: 34,
-                color: Color(0xFFE06D53),
+                color: ThemeColors.expense,
               ),
             ),
             const SizedBox(height: 20),
@@ -156,7 +154,7 @@ class LoadingScreen extends StatelessWidget {
               height: 26,
               child: CircularProgressIndicator(
                 strokeWidth: 3,
-                color: Color(0xFFE06D53),
+                color: ThemeColors.expense,
               ),
             ),
             const SizedBox(height: 14),
@@ -184,28 +182,13 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   TabType _currentTab = TabType.dashboard;
-  TabType _prevTab = TabType.dashboard;
-  bool _showAddTx = false;
-  Transaction? _editingTx;
 
-  static int _tabIndex(TabType t) {
-    switch (t) {
-      case TabType.dashboard:
-        return 0;
-      case TabType.transactions:
-        return 1;
-      case TabType.add:
-        return 2;
-      case TabType.reports:
-        return 3;
-      case TabType.settings:
-        return 4;
-    }
+  void _openAddTransaction([Transaction? tx]) {
+    AddTransactionScreen.show(context, editingTx: tx);
   }
 
   @override
   Widget build(BuildContext context) {
-    // Listen to theme changes so screens rebuild in real time.
     return ListenableBuilder(
       listenable: ThemeStore.instance,
       builder: (context, _) => _buildBody(),
@@ -213,8 +196,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _buildBody() {
-    // Onboarding: no accounts yet → show onboarding
-    if (AccountStore.instance.accounts.isEmpty && !_showAddTx) {
+    if (AccountStore.instance.accounts.isEmpty) {
       return OnboardingScreen(onComplete: () => setState(() {}));
     }
 
@@ -224,84 +206,54 @@ class _HomeShellState extends State<HomeShell> {
     switch (_currentTab) {
       case TabType.dashboard:
         body = DashboardScreen(
-          onAddTransaction: () => setState(() {
-            _editingTx = null;
-            _showAddTx = true;
-          }),
-          onOpenTransaction: (tx) => setState(() {
-            _editingTx = tx;
-            _showAddTx = true;
-          }),
+          key: const ValueKey('dashboard'),
+          onAddTransaction: () => _openAddTransaction(),
+          onOpenTransaction: (tx) => _openAddTransaction(tx),
         );
         break;
       case TabType.transactions:
         body = TransactionsScreen(
-          onOpenTransaction: (tx) => setState(() {
-            _editingTx = tx;
-            _showAddTx = true;
-          }),
+          key: const ValueKey('transactions'),
+          onOpenTransaction: (tx) => _openAddTransaction(tx),
         );
         break;
       case TabType.reports:
         body = ReportsScreen(
+          key: const ValueKey('reports'),
           onOpenChat: () => Navigator.of(context).push(
-            MaterialPageRoute(
+            CupertinoPageRoute(
               builder: (_) => const AIChatScreen(),
             ),
           ),
         );
         break;
       case TabType.settings:
-        body = SettingsScreen();
+        body = const SettingsScreen(
+          key: ValueKey('settings'),
+        );
         break;
       case TabType.add:
-        body = const DashboardScreen(
+        body = DashboardScreen(
+          key: const ValueKey('dashboard_add'),
           onAddTransaction: _noop,
           onOpenTransaction: _noopTx,
         );
         break;
     }
 
-    final slideDir = (_tabIndex(_currentTab) - _tabIndex(_prevTab)).sign;
+    // Smooth & lightweight Fade + Scale tab switcher
     body = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 320),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
       transitionBuilder: (child, animation) {
-        final reverse = animation.status == AnimationStatus.reverse;
-        final slide = slideDir * 0.08;
-        final begin = reverse ? 0.0 : slide;
-        final end = reverse ? -slide : 0.0;
-        final pos = Tween<Offset>(
-          begin: Offset(begin, 0),
-          end: Offset(end, 0),
-        ).animate(animation);
         return FadeTransition(
           opacity: animation,
-          child: SlideTransition(
-            position: pos,
-            child: child,
-          ),
+          child: child,
         );
       },
-      child: KeyedSubtree(
-        key: ValueKey(_currentTab),
-        child: body,
-      ),
+      child: body,
     );
-
-    // Add-transaction overlay (bottom sheet), covers whole screen
-    if (_showAddTx) {
-      body = Stack(
-        children: [
-          body,
-          AddTransactionScreen(
-            onClose: () => setState(() => _showAddTx = false),
-            editingTx: _editingTx,
-          ),
-        ],
-      );
-    }
 
     return Scaffold(
       backgroundColor: ThemeColors.bg(dark),
@@ -309,25 +261,18 @@ class _HomeShellState extends State<HomeShell> {
       body: Stack(
         children: [
           body,
-          if (!_showAddTx)
-            BottomNavBar(
-              currentTab: _currentTab == TabType.add
-                  ? TabType.dashboard
-                  : _currentTab,
-              onSelectTab: (tab) {
-                if (tab == TabType.add) {
-                  setState(() {
-                    _editingTx = null;
-                    _showAddTx = true;
-                  });
-                } else {
-                  setState(() {
-                    _prevTab = _currentTab;
-                    _currentTab = tab;
-                  });
-                }
-              },
-            ),
+          BottomNavBar(
+            currentTab: _currentTab == TabType.add ? TabType.dashboard : _currentTab,
+            onSelectTab: (tab) {
+              if (tab == TabType.add) {
+                _openAddTransaction();
+              } else {
+                setState(() {
+                  _currentTab = tab;
+                });
+              }
+            },
+          ),
         ],
       ),
     );

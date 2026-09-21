@@ -17,7 +17,7 @@ Aplikasi pencatat keuangan pribadi berbasis Flutter. Kelola akun, transaksi, kat
 ## Persyaratan
 
 - Flutter 3.41+ (Dart SDK ^3.11)
-- Android / Linux desktop (web belum didukung)
+- Android / Linux desktop
 
 ## Menjalankan
 

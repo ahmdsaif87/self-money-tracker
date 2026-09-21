@@ -22,7 +22,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _type = 'cash';
 
   static const _accountTypes = [
-    (key: 'cash', label: 'Tunai', icon: 'wallet'),
+    (key: 'cash', label: 'Cash', icon: 'wallet'),
     (key: 'bank', label: 'Bank', icon: 'banknote'),
     (key: 'ewallet', label: 'E-Wallet', icon: 'credit-card'),
   ];
@@ -37,7 +37,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _handleSave() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _showAlert('Nama Diperlukan', 'Masukkan nama akun pertama Anda.');
+      _showAlert('Name Required', 'Please enter a name for your first account.');
       return;
     }
     final typeDef = _accountTypes.firstWhere(
@@ -76,187 +76,192 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final dark = ThemeStore.instance.isDarkMode;
-    final cardBg = ThemeColors.card(dark);
-    final secondaryCard = ThemeColors.secondaryCard(dark);
-    final border = ThemeColors.border(dark);
-    final textPrimary = ThemeColors.textPrimary(dark);
-    final textSecondary = ThemeColors.textSecondary(dark);
-    final textMuted = ThemeColors.textMuted(dark);
-    final expenseAccent = ThemeColors.accentExpense(dark);
+    return ListenableBuilder(
+      listenable: ThemeStore.instance,
+      builder: (context, _) {
+        final dark = ThemeStore.instance.isDarkMode;
+        final cardBg = ThemeColors.card(dark);
+        final secondaryCard = ThemeColors.secondaryCard(dark);
+        final border = ThemeColors.border(dark);
+        final textPrimary = ThemeColors.textPrimary(dark);
+        final textSecondary = ThemeColors.textSecondary(dark);
+        final textMuted = ThemeColors.textMuted(dark);
+        final expenseAccent = ThemeColors.accentExpense(dark);
 
-    return Scaffold(
-      backgroundColor: ThemeColors.bg(dark),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 48),
-              Column(
+        return Scaffold(
+          backgroundColor: ThemeColors.bg(dark),
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const SizedBox(height: 48),
+                  Column(
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: expenseAccent.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: AppIcon('wallet', size: 32, color: expenseAccent),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Welcome to Money Tracker',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                          color: textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Add your first account to start tracking your cash flow seamlessly.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: textMuted),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
                   Container(
-                    width: 64,
-                    height: 64,
+                    padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: expenseAccent.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: border),
                     ),
-                    child: AppIcon('wallet', size: 32, color: expenseAccent),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Selamat Datang di Money Tracker',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: textPrimary,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SectionLabel('Account Name', color: textSecondary),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _nameController,
+                          decoration: InputDecoration(
+                            hintText: 'e.g. Wallet, Chase Bank, PayPal',
+                            hintStyle: TextStyle(color: textMuted),
+                            filled: true,
+                            fillColor: secondaryCard,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                          style: TextStyle(fontSize: 16, color: textPrimary),
+                        ),
+                        const SizedBox(height: 16),
+                        SectionLabel('Initial Balance (IDR)', color: textSecondary),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _balanceController,
+                          keyboardType: TextInputType.number,
+                          onChanged: (v) {
+                            final formatted = formatWithDots(v);
+                            if (formatted != v) {
+                              _balanceController.value = TextEditingValue(
+                                text: formatted,
+                                selection: TextSelection.collapsed(
+                                  offset: formatted.length,
+                                ),
+                              );
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: '0',
+                            hintStyle: TextStyle(color: textMuted),
+                            filled: true,
+                            fillColor: secondaryCard,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                          style: TextStyle(fontSize: 16, color: textPrimary),
+                        ),
+                        const SizedBox(height: 16),
+                        SectionLabel('Account Type', color: textSecondary),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _accountTypes.map((item) {
+                            final selected = _type == item.key;
+                            return GestureDetector(
+                              onTap: () => setState(() => _type = item.key),
+                              child: Container(
+                                width:
+                                    (MediaQuery.of(context).size.width -
+                                        24 * 2 -
+                                        8) /
+                                    2,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: selected ? expenseAccent : border,
+                                  ),
+                                  color: selected
+                                      ? hexA('#E06D53', 0.1)
+                                      : secondaryCard,
+                                ),
+                                child: Row(
+                                  children: [
+                                    AppIcon(
+                                      item.icon,
+                                      size: 18,
+                                      color: selected ? expenseAccent : textMuted,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      item.label,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: selected
+                                            ? FontWeight.w800
+                                            : FontWeight.w500,
+                                        color: selected
+                                            ? expenseAccent
+                                            : textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Tambahkan akun pertama Anda untuk mulai mencatat arus kas secara offline.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, color: textMuted),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _handleSave,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ThemeColors.fillExpense,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      'Get Started',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 32),
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SectionLabel('Nama Akun', color: textSecondary),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _nameController,
-                      decoration: InputDecoration(
-                        hintText: 'contoh: Dompet, Bank BCA, GoPay',
-                        hintStyle: TextStyle(color: textMuted),
-                        filled: true,
-                        fillColor: secondaryCard,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      style: TextStyle(fontSize: 16, color: textPrimary),
-                    ),
-                    const SizedBox(height: 16),
-                    SectionLabel('Saldo Awal (IDR)', color: textSecondary),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _balanceController,
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) {
-                        final formatted = formatWithDots(v);
-                        if (formatted != v) {
-                          _balanceController.value = TextEditingValue(
-                            text: formatted,
-                            selection: TextSelection.collapsed(
-                              offset: formatted.length,
-                            ),
-                          );
-                        }
-                      },
-                      decoration: InputDecoration(
-                        hintText: '0',
-                        hintStyle: TextStyle(color: textMuted),
-                        filled: true,
-                        fillColor: secondaryCard,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      style: TextStyle(fontSize: 16, color: textPrimary),
-                    ),
-                    const SizedBox(height: 16),
-                    SectionLabel('Jenis Akun', color: textSecondary),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _accountTypes.map((item) {
-                        final selected = _type == item.key;
-                        return GestureDetector(
-                          onTap: () => setState(() => _type = item.key),
-                          child: Container(
-                            width:
-                                (MediaQuery.of(context).size.width -
-                                    24 * 2 -
-                                    8) /
-                                2,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: selected ? expenseAccent : border,
-                              ),
-                              color: selected
-                                  ? hexA('#E06D53', 0.1)
-                                  : secondaryCard,
-                            ),
-                            child: Row(
-                              children: [
-                                AppIcon(
-                                  item.icon,
-                                  size: 18,
-                                  color: selected ? expenseAccent : textMuted,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  item.label,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: selected
-                                        ? FontWeight.w800
-                                        : FontWeight.w500,
-                                    color: selected
-                                        ? expenseAccent
-                                        : textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _handleSave,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: ThemeColors.fillExpense,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                child: const Text(
-                  'Mulai',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

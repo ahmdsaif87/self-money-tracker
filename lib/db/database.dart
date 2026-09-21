@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' hide Transaction;
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:path/path.dart' as p;
 import '../models/models.dart';
 
@@ -20,8 +22,9 @@ class DB {
 
   Future<void> initDatabase() async {
     if (_db != null) return;
-    // Desktop (Linux/macOS/Windows): sqflite_common_ffi required.
-    if (!Platform.isAndroid && !Platform.isIOS) {
+    if (kIsWeb) {
+      databaseFactory = databaseFactoryFfiWeb;
+    } else if (!Platform.isAndroid && !Platform.isIOS) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
@@ -124,18 +127,18 @@ class DB {
 
     final now = DateTime.now().toIso8601String();
     const defaults = [
-      ['cat_groceries', 'Belanja Bulanan', 'expense', 'shopping-cart', '#E06D53'],
-      ['cat_dining', 'Makan di Luar', 'expense', 'utensils', '#E58A75'],
-      ['cat_bills', 'Tagihan & Utilitas', 'expense', 'file-text', '#C8543B'],
-      ['cat_transport', 'Transportasi', 'expense', 'car', '#D97C65'],
-      ['cat_shopping', 'Belanja', 'expense', 'shopping-bag', '#F0907A'],
-      ['cat_health', 'Kesehatan', 'expense', 'heart', '#B84C34'],
-      ['cat_entertainment', 'Hiburan', 'expense', 'film', '#587D63'],
-      ['cat_other', 'Lainnya', 'expense', 'tag', '#8C827A'],
-      ['cat_salary', 'Gaji', 'income', 'briefcase', '#7FA98B'],
-      ['cat_freelance', 'Pekerjaan Lepas', 'income', 'laptop', '#97BC9F'],
-      ['cat_investments', 'Hasil Investasi', 'income', 'trending-up', '#587D63'],
-      ['cat_gift', 'Hadiah', 'income', 'gift', '#D97C65'],
+      ['cat_groceries', 'Groceries', 'expense', 'shopping-cart', '#E06D53'],
+      ['cat_dining', 'Dining Out', 'expense', 'utensils', '#E58A75'],
+      ['cat_bills', 'Bills & Utilities', 'expense', 'file-text', '#C8543B'],
+      ['cat_transport', 'Transport', 'expense', 'car', '#D97C65'],
+      ['cat_shopping', 'Shopping', 'expense', 'shopping-bag', '#F0907A'],
+      ['cat_health', 'Health & Medical', 'expense', 'heart', '#B84C34'],
+      ['cat_entertainment', 'Entertainment', 'expense', 'film', '#587D63'],
+      ['cat_other', 'Other Expenses', 'expense', 'tag', '#8C827A'],
+      ['cat_salary', 'Salary', 'income', 'briefcase', '#7FA98B'],
+      ['cat_freelance', 'Freelance', 'income', 'laptop', '#97BC9F'],
+      ['cat_investments', 'Investments', 'income', 'trending-up', '#587D63'],
+      ['cat_gift', 'Gifts & Rewards', 'income', 'gift', '#D97C65'],
     ];
     final batch = db.batch();
     for (final d in defaults) {

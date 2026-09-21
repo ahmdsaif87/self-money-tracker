@@ -49,20 +49,28 @@ class CategoryStore extends ChangeNotifier {
   Future<void> updateCategory(
     String id, {
     String? name,
+    String? type,
     String? icon,
     String? color,
   }) async {
-    final updates = <String, dynamic>{
-      'name': ?name,
-      'icon': ?icon,
-      'color': ?color,
-    };
+    final updates = <String, dynamic>{};
+    if (name != null) updates['name'] = name;
+    if (type != null) updates['type'] = type;
+    if (icon != null) updates['icon'] = icon;
+    if (color != null) updates['color'] = color;
+    if (updates.isEmpty) return;
+
     await DB.instance.db.update(
       'categories',
       updates,
       where: 'id = ?',
       whereArgs: [id],
     );
+    await fetchCategories();
+  }
+
+  Future<void> deleteCategory(String id) async {
+    await DB.instance.db.delete('categories', where: 'id = ?', whereArgs: [id]);
     await fetchCategories();
   }
 

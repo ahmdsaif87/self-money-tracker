@@ -28,14 +28,14 @@ Future<String?> showMonthPickerDialog(
         'Feb',
         'Mar',
         'Apr',
-        'Mei',
+        'May',
         'Jun',
         'Jul',
-        'Agu',
+        'Aug',
         'Sep',
-        'Okt',
+        'Oct',
         'Nov',
-        'Des',
+        'Dec',
       ];
       return StatefulBuilder(
         builder: (ctx, setDialogState) {
@@ -136,7 +136,7 @@ Future<String?> showMonthPickerDialog(
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
                     child: Text(
-                      'Batal',
+                      'Cancel',
                       style: TextStyle(
                         color: textSecondary,
                         fontWeight: FontWeight.w800,

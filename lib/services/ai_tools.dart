@@ -61,7 +61,7 @@ class AITools {
           },
           'category_name': {
             'type': 'STRING',
-            'description': 'Nama kategori (opsional, akan dicocokkan otomatis).',
+            'description': 'Nama kategori atau klasifikasi paling tepat dari transaksi berdasarkan prompt/deskripsi pengguna (contoh: jika user sebut "Lunch" / "Makan Siang" pilih kategori "Dining Out" / "Makan di Luar" / "Food & Beverage", jika "Bensin" / "Ojek" pilih "Transport"). AI harus mengklasifikasikan nama kategori secara cerdas.',
           },
           'note': {
             'type': 'STRING',
@@ -102,6 +102,32 @@ class AITools {
         },
         'required': ['income'],
       },
+    },
+    {
+      'name': 'analyze_spending_anomalies',
+      'description': 'Menganalisis anomali pengeluaran dengan membandingkan pengeluaran bulan ini dan bulan lalu per kategori. Memberikan insight kategori mana yang bengkak/naik drastis.',
+      'parameters': {
+        'type': 'OBJECT',
+        'properties': {},
+      },
+    },
+    {
+      'name': 'get_summary_by_date',
+      'description': 'Mendapatkan ringkasan total pemasukan dan pengeluaran beserta rincian kategori pada rentang tanggal spesifik.',
+      'parameters': {
+        'type': 'OBJECT',
+        'properties': {
+          'start_date': {
+            'type': 'STRING',
+            'description': 'Tanggal awal dalam format YYYY-MM-DD.',
+          },
+          'end_date': {
+            'type': 'STRING',
+            'description': 'Tanggal akhir dalam format YYYY-MM-DD.',
+          }
+        },
+        'required': ['start_date', 'end_date'],
+      },
     }
   ];
 
@@ -120,6 +146,10 @@ class AITools {
           return _calculateSavingPlan(args);
         case 'calculate_budget':
           return _calculateBudget(args);
+        case 'analyze_spending_anomalies':
+          return await _analyzeSpendingAnomalies();
+        case 'get_summary_by_date':
+          return await _getSummaryByDate(args);
         default:
           return {'error': 'Tool $name not found'};
       }
@@ -210,7 +240,7 @@ class AITools {
     String? categoryName;
     if (type != 'transfer') {
       final searchText = '${note ?? ''} ${catName ?? ''}'.trim();
-      final matched = await _matchCategory(type, searchText);
+      final matched = await _matchCategory(type, searchText, catNameFromAi: catName);
       if (matched != null) {
         categoryId = matched.id;
         categoryName = matched.name;
@@ -244,7 +274,7 @@ class AITools {
     ],
     'cat_dining': [
       'makan', 'makanan', 'minum', 'kopi', 'warung', 'restoran', 'cafe',
-      'nasi', 'ayam', 'mie', 'snack', 'jajan', 'burger', 'pizza',
+      'nasi', 'ayam', 'mie', 'snack', 'jajan', 'burger', 'pizza', 'lunch', 'dinner', 'breakfast',
     ],
     'cat_bills': [
       'tagihan', 'listrik', 'air', 'pulsa', 'internet', 'wifi', 'bpjs',
@@ -281,41 +311,59 @@ class AITools {
     'cat_gift': ['hadiah', 'gift', 'kado'],
   };
 
-  static Future<Category?> _matchCategory(String? type, String input) async {
-    if (type == null || input.trim().isEmpty) return null;
+  static Future<Category?> _matchCategory(String? type, String input, {String? catNameFromAi}) async {
+    if (type == null) return null;
     final cats = CategoryStore.instance.categories
         .where((c) => c.type == type)
         .toList();
     if (cats.isEmpty) return null;
 
-    final text = input.toLowerCase();
-    Category? best;
-    var bestScore = 0;
-    for (final c in cats) {
-      var score = 0;
-      final keywords = _categoryKeywords[c.id] ?? [c.name];
-      for (final kw in keywords) {
-        if (text.contains(kw.toLowerCase())) score++;
-      }
-      if (text.contains(c.name.toLowerCase())) score += 3;
-      if (score > bestScore) {
-        bestScore = score;
-        best = c;
+    final text = input.trim().toLowerCase();
+    final aiCat = catNameFromAi?.trim().toLowerCase();
+
+    // 1. Direct match with AI suggested category name if provided
+    if (aiCat != null && aiCat.isNotEmpty) {
+      for (final c in cats) {
+        final cName = c.name.toLowerCase();
+        if (cName == aiCat || cName.contains(aiCat) || aiCat.contains(cName)) {
+          return c;
+        }
       }
     }
-    if (best != null && bestScore > 0) return best;
 
+    // 2. Direct match with user input text vs category names
+    if (text.isNotEmpty) {
+      for (final c in cats) {
+        final cName = c.name.toLowerCase();
+        if (cName.isNotEmpty && (text.contains(cName) || cName.contains(text))) {
+          return c;
+        }
+      }
+
+      // 3. Keyword matching
+      Category? best;
+      var bestScore = 0;
+      for (final c in cats) {
+        var score = 0;
+        final keywords = _categoryKeywords[c.id] ?? [c.name];
+        for (final kw in keywords) {
+          if (text.contains(kw.toLowerCase())) score++;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      if (best != null && bestScore > 0) return best;
+    }
+
+    // 4. Return first category for type if available, or 'Lainnya'
     final fallback = cats
-        .where((c) => c.name.toLowerCase() == 'lainnya')
+        .where((c) => c.name.toLowerCase() == 'lainnya' || c.name.toLowerCase() == 'other')
         .firstOrNull;
     if (fallback != null) return fallback;
 
-    return CategoryStore.instance.addCategory(
-      name: 'Lainnya',
-      type: type,
-      icon: 'tag',
-      color: '#8C827A',
-    );
+    return cats.firstOrNull;
   }
 
   static Map<String, dynamic> _calculateSavingPlan(Map<String, dynamic> args) {
@@ -351,6 +399,97 @@ class AITools {
       'needs': needs.roundToDouble(),
       'wants': wants.roundToDouble(),
       'savings': savings.roundToDouble(),
+    };
+  }
+
+  static Future<Map<String, dynamic>> _analyzeSpendingAnomalies() async {
+    final summary = await FinanceSummaryService.buildFinancialSummary(monthCount: 2);
+    if (summary.months.length < 2) {
+      return {'message': 'Belum cukup data untuk membandingkan bulan ini dan bulan sebelumnya.'};
+    }
+
+    final thisMonth = summary.months[0];
+    final lastMonth = summary.months[1];
+
+    final anomalies = <Map<String, dynamic>>[];
+    for (final catThis in thisMonth.byCategory) {
+      if (catThis.type != 'expense') continue;
+      
+      final catLast = lastMonth.byCategory.where((c) => c.name == catThis.name).firstOrNull;
+      final lastAmount = catLast?.amount ?? 0.0;
+      
+      if (lastAmount > 0) {
+        final increasePct = ((catThis.amount - lastAmount) / lastAmount) * 100;
+        if (increasePct > 20) { // Threshold anomali: naik > 20%
+          anomalies.add({
+            'category': catThis.name,
+            'this_month': catThis.amount,
+            'last_month': lastAmount,
+            'increase_percentage': increasePct.toStringAsFixed(1),
+          });
+        }
+      } else if (catThis.amount > 0) {
+        anomalies.add({
+          'category': catThis.name,
+          'this_month': catThis.amount,
+          'last_month': 0.0,
+          'increase_percentage': '100',
+          'note': 'Pengeluaran baru di bulan ini',
+        });
+      }
+    }
+
+    return {
+      'this_month_total_expense': thisMonth.expense,
+      'last_month_total_expense': lastMonth.expense,
+      'anomalies': anomalies,
+    };
+  }
+
+  static Future<Map<String, dynamic>> _getSummaryByDate(Map<String, dynamic> args) async {
+    final startDateStr = args['start_date'] as String?;
+    final endDateStr = args['end_date'] as String?;
+
+    if (startDateStr == null || endDateStr == null) {
+      return {'error': 'start_date and end_date are required'};
+    }
+
+    await TransactionStore.instance.fetchTransactions();
+    await CategoryStore.instance.fetchCategories();
+    final categories = CategoryStore.instance.categories;
+    final catMap = <String, Category>{for (final c in categories) c.id: c};
+    final txs = TransactionStore.instance.transactions;
+
+    double income = 0;
+    double expense = 0;
+    final byCat = <String, ({String name, double amount, String type})>{};
+
+    for (final tx in txs) {
+      if (tx.date.compareTo(startDateStr) >= 0 && tx.date.compareTo(endDateStr) <= 0) {
+        if (tx.type == 'income') income += tx.amount;
+        if (tx.type == 'expense') expense += tx.amount;
+
+        if (tx.type != 'transfer') {
+          final name = tx.categoryId != null ? (catMap[tx.categoryId]?.name ?? 'Tanpa kategori') : 'Tanpa kategori';
+          final keyCat = tx.categoryId ?? 'none';
+          final cur = byCat[keyCat] ?? (name: name, amount: 0.0, type: tx.type);
+          byCat[keyCat] = (name: cur.name, amount: cur.amount + tx.amount, type: tx.type);
+        }
+      }
+    }
+
+    final list = byCat.values.toList()..sort((a, b) => b.amount.compareTo(a.amount));
+
+    return {
+      'start_date': startDateStr,
+      'end_date': endDateStr,
+      'income': income,
+      'expense': expense,
+      'categories': list.map((c) => {
+        'name': c.name,
+        'type': c.type,
+        'amount': c.amount,
+      }).toList(),
     };
   }
 }

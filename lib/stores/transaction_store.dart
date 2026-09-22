@@ -15,6 +15,110 @@ class TransactionStore extends ChangeNotifier {
   List<Transaction> get transactions => _transactions;
   bool get isLoading => _isLoading;
 
+  /// --- Paginated per-month cache (DB-level filtering, not in-memory). ---
+  static const int monthPageSize = 30;
+  final Map<String, List<Transaction>> _monthCache = {};
+  final Map<String, int> _monthTotal = {};
+
+  String _monthCacheKey(String monthKey, String? type, String? search) {
+    final t = (type == null || type.isEmpty) ? 'semua' : type;
+    final s = (search ?? '').trim().toLowerCase();
+    return '$monthKey|$t|$s';
+  }
+
+  /// Fetch one page for a month filter straight from SQLite.
+  /// Returns (items, total, hasMore). Results are cached per page-0 key
+  /// and extended as further pages load.
+  Future<({List<Transaction> items, int total, bool hasMore})> fetchMonthPage(
+    String monthKey, {
+    String? type,
+    String? search,
+    int limit = monthPageSize,
+    int offset = 0,
+  }) async {
+    final items = await DB.instance.fetchTransactionsByMonth(
+      monthKey,
+      type: type,
+      search: search,
+      limit: limit,
+      offset: offset,
+    );
+    final total = await DB.instance.countTransactionsByMonth(
+      monthKey,
+      type: type,
+      search: search,
+    );
+    final hasMore = offset + items.length < total;
+    final key = _monthCacheKey(monthKey, type, search);
+    if (offset == 0) {
+      _monthCache[key] = items;
+    } else {
+      final existing = _monthCache[key] ?? [];
+      _monthCache[key] = [...existing, ...items];
+    }
+    _monthTotal[key] = total;
+    return (items: items, total: total, hasMore: hasMore);
+  }
+
+  /// Cached items for a month filter (empty if not yet fetched).
+  List<Transaction> cachedMonth(String monthKey, {String? type, String? search}) {
+    return _monthCache[_monthCacheKey(monthKey, type, search)] ?? [];
+  }
+
+  int? cachedMonthTotal(String monthKey, {String? type, String? search}) {
+    return _monthTotal[_monthCacheKey(monthKey, type, search)];
+  }
+
+  void _invalidateMonthCache() {
+    _monthCache.clear();
+    _monthTotal.clear();
+  }
+
+  /// Public hook for bulk writes that bypass add/update/delete
+  /// (e.g. XLSX import) so paged month views don't go stale.
+  void invalidateMonthCache() => _invalidateMonthCache();
+
+  /// SQL-side search across all dates (for AI tools) — capped LIMIT.
+  Future<List<Transaction>> searchTransactions(String keyword, {int limit = 10}) {
+    return DB.instance.searchTransactions(keyword, limit: limit);
+  }
+
+  /// SQL-side match count for a keyword search (for AI tools).
+  Future<int> countSearchTransactions(String keyword) {
+    return DB.instance.countSearchTransactions(keyword);
+  }
+
+  /// SQL-side summary for an arbitrary date range (for AI tools).
+  Future<({double income, double expense})> summaryByDateRange(
+    String startDate,
+    String endDate,
+  ) {
+    return DB.instance.fetchSummaryByDateRange(startDate, endDate);
+  }
+
+  /// SQL-side per-category breakdown for an arbitrary date range (for AI tools).
+  Future<List<({String key, String name, double amount, String type, String color, String icon})>>
+      categoryBreakdownByDateRange(String startDate, String endDate) {
+    return DB.instance.fetchCategoryBreakdownByDateRange(startDate, endDate);
+  }
+
+  /// SQL-side aggregations (no Dart fold over the full table).
+  Future<({double income, double expense})> monthlySummary(String monthKey) {
+    return DB.instance.fetchMonthlySummary(monthKey);
+  }
+
+  Future<List<({String key, String name, double amount, String type, String color, String icon})>>
+      categoryBreakdown(String monthKey, String type) {
+    return DB.instance.fetchCategoryBreakdown(monthKey, type);
+  }
+
+  Future<List<({String key, double income, double expense})>> monthlyTrends(
+    String endMonthKey, [
+    int count = 6,
+  ]) {
+    return DB.instance.fetchMonthlyTrends(endMonthKey, count);
+  }
+
   double _deltaForAccount(Transaction tx, String accountId) {
     if (tx.type == 'income') return tx.accountId == accountId ? tx.amount : 0;
     if (tx.type == 'expense') return tx.accountId == accountId ? -tx.amount : 0;
@@ -94,6 +198,7 @@ class TransactionStore extends ChangeNotifier {
     }
     await _applyBalanceChanges(amounts);
 
+    _invalidateMonthCache();
     await fetchTransactions();
     await AccountStore.instance.fetchAccounts();
     return newTx;
@@ -152,6 +257,7 @@ class TransactionStore extends ChangeNotifier {
       where: 'id = ?',
       whereArgs: [id],
     );
+    _invalidateMonthCache();
     await fetchTransactions();
     await AccountStore.instance.fetchAccounts();
   }
@@ -169,6 +275,7 @@ class TransactionStore extends ChangeNotifier {
       await _applyBalanceChanges(amounts);
     }
     await DB.instance.db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+    _invalidateMonthCache();
     await fetchTransactions();
     await AccountStore.instance.fetchAccounts();
   }

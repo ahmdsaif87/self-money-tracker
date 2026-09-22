@@ -256,7 +256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Choose how your AI Financial Assistant talks to you.',
+                'Your AI is always a proactive financial advisor (health score, 50/30/20 budget, savings goals). Below only changes how it talks to you.',
                 style: TextStyle(fontSize: 13, color: textMuted, height: 1.4),
               ),
               const SizedBox(height: 16),
@@ -665,7 +665,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
               children: [
-                // Profile Card
+                // ── Profile hero (Account & Security) ──
+                _SectionHeader('ACCOUNT & SECURITY', dark),
                 Card(
                   color: ThemeColors.card(dark),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -702,114 +703,177 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
 
-                // Theme Settings
-                Card(
-                  color: ThemeColors.card(dark),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  child: SwitchListTile(
-                    title: Text('Dark Mode', style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600)),
-                    secondary: const AppIcon('moon', size: 22, color: ThemeColors.expense),
-                    value: dark,
-                    onChanged: (val) => ThemeStore.instance.toggleDarkMode(),
-                  ),
+                // ── Preferences & Theme (Cupertino inset grouped) ──
+                _SectionHeader('PREFERENCES & THEME', dark),
+                _GroupedCard(
+                  dark: dark,
+                  children: [
+                    SwitchListTile(
+                      title: Text('Dark Mode', style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        dark ? 'Easy on the eyes at night' : 'Bright and clear for daytime',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      secondary: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: ThemeColors.expense.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const AppIcon('moon', size: 20, color: ThemeColors.expense),
+                      ),
+                      value: dark,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      onChanged: (val) => ThemeStore.instance.toggleDarkMode(),
+                    ),
+                    _groupedDivider(dark),
+                    ListTile(
+                      leading: _groupedIcon(
+                        AppIcon('user', size: 20, color: ThemeColors.accentExpense(false)),
+                        ThemeColors.accentExpense(false),
+                      ),
+                      title: Text('AI Assistant Persona', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                      subtitle: Text(
+                        ProfileStore.instance.aiPersona == 'strict'
+                            ? 'Strict & Firm'
+                            : ProfileStore.instance.aiPersona == 'casual'
+                                ? 'Casual & Friendly'
+                                : 'Professional',
+                      ),
+                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      onTap: _showAIPersonaDialog,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
 
-                // Accounts Header & Section
+                // ── Financial Accounts ──
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Financial Accounts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
+                    _SectionHeader('FINANCIAL ACCOUNTS', dark, inline: true),
                     TextButton.icon(
                       onPressed: () => _showAccountDialog(),
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Add'),
+                      style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                     ),
                   ],
                 ),
-                ...accounts.map(
-                  (acc) => Card(
-                    color: ThemeColors.card(dark),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: hexColor(acc.color).withValues(alpha: 0.15),
-                        child: AppIcon(acc.icon, size: 20, color: hexColor(acc.color)),
-                      ),
-                      title: Text(acc.name, style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)),
-                      subtitle: Text(formatCurrency(acc.balance)),
-                      trailing: const Icon(Icons.edit, size: 18),
-                      onTap: () => _showAccountDialog(acc),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Services & Data Backup Section
-                Text('Services & Preferences', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
-                const SizedBox(height: 8),
-                Card(
-                  color: ThemeColors.card(dark),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  child: Column(
+                if (accounts.isEmpty)
+                  _GroupedCard(
+                    dark: dark,
                     children: [
                       ListTile(
-                        leading: const AppIcon('tag', size: 22, color: ThemeColors.income),
-                        title: Text('Manage Categories', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
-                        subtitle: Text(
-                          '${categories.where((c) => c.type == 'expense').length} Expense, ${categories.where((c) => c.type == 'income').length} Income categories',
+                        leading: _groupedIcon(
+                          const AppIcon('wallet', size: 20, color: ThemeColors.warningDefault),
+                          ThemeColors.warningDefault,
                         ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(
-                          context,
-                          CupertinoPageRoute(builder: (_) => const CategoriesScreen()),
-                        ),
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: const AppIcon('sparkles', size: 22, color: ThemeColors.expense),
-                        title: Text('Gemini AI Key', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
-                        subtitle: Text(_hasApiKey ? 'Connected' : 'Not configured'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: _showApiKeyDialog,
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: AppIcon('user', size: 22, color: ThemeColors.accentExpense(false)),
-                        title: Text('AI Assistant Persona', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
-                        subtitle: Text(
-                          ProfileStore.instance.aiPersona == 'strict' 
-                              ? 'Strict & Firm' 
-                              : ProfileStore.instance.aiPersona == 'casual' 
-                                  ? 'Casual & Friendly' 
-                                  : 'Professional',
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: _showAIPersonaDialog,
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: const AppIcon('file-text', size: 22, color: ThemeColors.income),
-                        title: Text('Export Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
-                        subtitle: const Text('Save or share your transaction records'),
-                        trailing: _isExporting
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.share, size: 18),
-                        onTap: _handleExport,
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: const AppIcon('inbox', size: 22, color: ThemeColors.warningDefault),
-                        title: Text('Import Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
-                        subtitle: const Text('Restore financial records from backup file'),
-                        trailing: _isImporting
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.file_upload_outlined, size: 18),
-                        onTap: _handleImport,
+                        title: Text('No accounts yet', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                        subtitle: const Text('Add your first wallet, bank, or e-wallet'),
+                        trailing: const Icon(Icons.add_circle_outline, size: 20),
+                        onTap: () => _showAccountDialog(),
                       ),
                     ],
+                  )
+                else
+                  _GroupedCard(
+                    dark: dark,
+                    children: [
+                      for (int i = 0; i < accounts.length; i++) ...[
+                        if (i > 0) _groupedDivider(dark),
+                        Builder(
+                          builder: (ctx) {
+                            final acc = accounts[i];
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: hexColor(acc.color).withValues(alpha: 0.15),
+                                child: AppIcon(acc.icon, size: 20, color: hexColor(acc.color)),
+                              ),
+                              title: Text(acc.name, style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)),
+                              subtitle: Text(formatCurrency(acc.balance)),
+                              trailing: Icon(Icons.chevron_right, size: 18, color: ThemeColors.textMuted(dark)),
+                              onTap: () => _showAccountDialog(acc),
+                            );
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+
+                // ── AI Services ──
+                _SectionHeader('AI SERVICES', dark),
+                _GroupedCard(
+                  dark: dark,
+                  children: [
+                    ListTile(
+                      leading: _groupedIcon(
+                        const AppIcon('sparkles', size: 20, color: ThemeColors.expense),
+                        ThemeColors.expense,
+                      ),
+                      title: Text('Gemini AI Key', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                      subtitle: Text(_hasApiKey ? 'Connected ✓' : 'Not configured'),
+                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      onTap: _showApiKeyDialog,
+                    ),
+                  ],
+                ),
+
+                // ── Data Management ──
+                _SectionHeader('DATA MANAGEMENT', dark),
+                _GroupedCard(
+                  dark: dark,
+                  children: [
+                    ListTile(
+                      leading: _groupedIcon(
+                        const AppIcon('tag', size: 20, color: ThemeColors.income),
+                        ThemeColors.income,
+                      ),
+                      title: Text('Manage Categories', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                      subtitle: Text(
+                        '${categories.where((c) => c.type == 'expense').length} Expense, ${categories.where((c) => c.type == 'income').length} Income categories',
+                      ),
+                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      onTap: () => Navigator.push(
+                        context,
+                        CupertinoPageRoute(builder: (_) => const CategoriesScreen()),
+                      ),
+                    ),
+                    _groupedDivider(dark),
+                    ListTile(
+                      leading: _groupedIcon(
+                        const AppIcon('file-text', size: 20, color: ThemeColors.income),
+                        ThemeColors.income,
+                      ),
+                      title: Text('Export Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                      subtitle: const Text('Save or share your transaction records'),
+                      trailing: _isExporting
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.share, size: 18),
+                      onTap: _handleExport,
+                    ),
+                    _groupedDivider(dark),
+                    ListTile(
+                      leading: _groupedIcon(
+                        const AppIcon('inbox', size: 20, color: ThemeColors.warningDefault),
+                        ThemeColors.warningDefault,
+                      ),
+                      title: Text('Import Excel Data (.xlsx)', style: TextStyle(fontWeight: FontWeight.w600, color: textPrimary)),
+                      subtitle: const Text('Restore financial records from backup file'),
+                      trailing: _isImporting
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.file_upload_outlined, size: 18),
+                      onTap: _handleImport,
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 20),
+                  child: Center(
+                    child: Text(
+                      'Self Money Tracker • v1.0',
+                      style: TextStyle(fontSize: 11, color: ThemeColors.textMuted(dark)),
+                    ),
                   ),
                 ),
               ],
@@ -819,4 +883,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
   }
+}
+
+/// Cupertino-style section header — small caps, muted, premium fintech feel.
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final bool dark;
+  final bool inline;
+
+  const _SectionHeader(this.title, this.dark, {this.inline = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = Text(
+      title,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
+        color: ThemeColors.textMuted(dark),
+      ),
+    );
+    if (inline) return Padding(padding: const EdgeInsets.only(top: 20), child: label);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+      child: label,
+    );
+  }
+}
+
+/// Cupertino-style inset grouped card: one continuous surface with dividers.
+class _GroupedCard extends StatelessWidget {
+  final bool dark;
+  final List<Widget> children;
+
+  const _GroupedCard({required this.dark, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: ThemeColors.card(dark),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(children: children),
+      ),
+    );
+  }
+}
+
+Widget _groupedDivider(bool dark) {
+  return Divider(
+    height: 1,
+    thickness: 1,
+    indent: 56,
+    endIndent: 0,
+    color: ThemeColors.border(dark).withValues(alpha: 0.6),
+  );
+}
+
+Widget _groupedIcon(Widget icon, Color tint) {
+  return Container(
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: tint.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: icon,
+  );
 }

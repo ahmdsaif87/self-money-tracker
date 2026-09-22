@@ -11,13 +11,16 @@ import '../components/skeleton.dart';
 import '../components/sheet_drag.dart' show hexColor;
 import '../utils/amount.dart';
 import '../utils/date.dart';
+import 'add_transaction_screen.dart';
 
 class TransactionsScreen extends StatefulWidget {
   final void Function(Transaction) onOpenTransaction;
+  final VoidCallback? onAddTransaction;
 
   const TransactionsScreen({
     super.key,
     required this.onOpenTransaction,
+    this.onAddTransaction,
   });
 
   @override
@@ -28,8 +31,18 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   String _filter = 'semua'; // semua | expense | income | transfer
   String _monthKey = _currentMonthKey();
   String _search = '';
-  bool _isFiltering = false;
   final _searchController = TextEditingController();
+  final _scrollController = ScrollController();
+
+  // DB-paginated state (no full-table load into memory).
+  List<Transaction> _items = [];
+  int _total = 0;
+  bool _hasMore = false;
+  bool _isInitialLoading = true;
+  bool _isLoadingMore = false;
+  double _summaryIncome = 0;
+  double _summaryExpense = 0;
+  int _requestId = 0;
 
   static String _currentMonthKey() {
     final now = DateTime.now();
@@ -37,25 +50,105 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    // Listen to store mutations (add/update/delete from the sheet) and refresh page.
+    TransactionStore.instance.addListener(_onStoreChanged);
+    _loadFirstPage();
+  }
+
+  @override
   void dispose() {
+    TransactionStore.instance.removeListener(_onStoreChanged);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _triggerFilterChange(VoidCallback action) async {
-    setState(() {
-      _isFiltering = true;
-      action();
-    });
-    await Future.delayed(const Duration(milliseconds: 180));
-    if (mounted) {
+  void _onStoreChanged() {
+    // Cheap refresh: reload first page (store invalidates its month cache on write).
+    _loadFirstPage();
+  }
+
+  void _onScroll() {
+    if (!_hasMore || _isLoadingMore || _isInitialLoading) return;
+    if (!_scrollController.hasClients) return;
+    final max = _scrollController.position.maxScrollExtent;
+    final cur = _scrollController.position.pixels;
+    if (max - cur < 600) _loadNextPage();
+  }
+
+  Future<void> _loadFirstPage() async {
+    final id = ++_requestId;
+    setState(() => _isInitialLoading = true);
+    try {
+      final store = TransactionStore.instance;
+      final res = await store.fetchMonthPage(
+        _monthKey,
+        type: _filter,
+        search: _search,
+        limit: TransactionStore.monthPageSize,
+        offset: 0,
+      );
+      final summary = await store.monthlySummary(_monthKey);
+      if (!mounted || id != _requestId) return;
       setState(() {
-        _isFiltering = false;
+        _items = res.items;
+        _total = res.total;
+        _hasMore = res.hasMore;
+        _summaryIncome = summary.income;
+        _summaryExpense = summary.expense;
+        _isInitialLoading = false;
       });
+    } catch (_) {
+      if (mounted && id == _requestId) setState(() => _isInitialLoading = false);
     }
   }
 
+  Future<void> _loadNextPage() async {
+    setState(() => _isLoadingMore = true);
+    try {
+      final res = await TransactionStore.instance.fetchMonthPage(
+        _monthKey,
+        type: _filter,
+        search: _search,
+        limit: TransactionStore.monthPageSize,
+        offset: _items.length,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = [..._items, ...res.items];
+        _total = res.total;
+        _hasMore = res.hasMore;
+        _isLoadingMore = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
+  }
+
+  Future<void> _triggerFilterChange(VoidCallback action) async {
+    action();
+    await _loadFirstPage();
+  }
+
+  void _onSearchChanged(String v) {
+    _search = v;
+    // Debounce: wait for user to stop typing before hitting SQLite.
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted || _search != v) return;
+      _loadFirstPage();
+    });
+  }
+
   Future<void> _handleDeleteTx(Transaction tx) async {
+    // Optimistic removal for instant feedback.
+    setState(() {
+      _items = _items.where((t) => t.id != tx.id).toList();
+      _total = (_total - 1).clamp(0, 1 << 31);
+    });
     await TransactionStore.instance.deleteTransaction(tx.id);
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -88,6 +181,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
+  Future<void> _onRefresh() async {
+    await _loadFirstPage();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -100,37 +197,19 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               listenable: AccountStore.instance,
               builder: (context, _) {
                 final dark = ThemeStore.instance.isDarkMode;
-                final all = TransactionStore.instance.transactions;
                 final categories = CategoryStore.instance.categories;
                 final accounts = AccountStore.instance.accounts;
 
                 final catMap = <String, Category>{for (final c in categories) c.id: c};
                 final accMap = <String, Account>{for (final a in accounts) a.id: a};
 
-                final inMonth = all.where((t) => t.date.startsWith(_monthKey)).toList();
-                final q = _search.trim().toLowerCase();
-                final searched = q.isEmpty
-                    ? inMonth
-                    : inMonth.where((t) {
-                        final cat = t.categoryId != null ? catMap[t.categoryId] : null;
-                        final acc = accMap[t.accountId];
-                        return (t.note?.toLowerCase().contains(q) ?? false) ||
-                            (cat?.name.toLowerCase().contains(q) ?? false) ||
-                            (acc?.name.toLowerCase().contains(q) ?? false);
-                      }).toList();
-                final filtered = _filter == 'semua'
-                    ? searched
-                    : searched.where((t) => t.type == _filter).toList();
-
-                final income = inMonth
-                    .where((t) => t.type == 'income')
-                    .fold<double>(0, (s, t) => s + t.amount);
-                final expense = inMonth
-                    .where((t) => t.type == 'expense')
-                    .fold<double>(0, (s, t) => s + t.amount);
+                // Data already filtered + paginated in SQLite; just group for display.
+                // Summary totals come from SQL SUM (not Dart fold).
+                final income = _summaryIncome;
+                final expense = _summaryExpense;
 
                 final groups = <String, List<Transaction>>{};
-                for (final tx in filtered) {
+                for (final tx in _items) {
                   groups.putIfAbsent(tx.date, () => []).add(tx);
                 }
                 final sortedKeys = groups.keys.toList()..sort((a, b) => b.compareTo(a));
@@ -153,9 +232,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       listItems.add({'type': 'tx', 'data': tx});
                     }
                   }
+                  if (_hasMore || _isLoadingMore) listItems.add('load_more');
                 }
 
-                if ((TransactionStore.instance.isLoading && all.isEmpty) || _isFiltering) {
+                if (_isInitialLoading && _items.isEmpty) {
                   return Scaffold(
                     backgroundColor: ThemeColors.bg(dark),
                     body: const SafeArea(child: SkeletonList(rows: 7)),
@@ -166,10 +246,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                   backgroundColor: ThemeColors.bg(dark),
                   body: SafeArea(
                     child: RefreshIndicator(
-                      onRefresh: () async {
-                        await TransactionStore.instance.fetchTransactions();
-                      },
+                      onRefresh: _onRefresh,
                       child: ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 120),
                         itemCount: listItems.length,
                         itemBuilder: (context, index) {
@@ -247,7 +326,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                                     Expanded(
                                       child: TextField(
                                         controller: _searchController,
-                                        onChanged: (v) => setState(() => _search = v),
+                                        onChanged: _onSearchChanged,
                                         style: TextStyle(color: ThemeColors.textPrimary(dark), fontSize: 14),
                                         decoration: InputDecoration(
                                           hintText: 'Search notes, categories, accounts...',
@@ -257,11 +336,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                                         ),
                                       ),
                                     ),
-                                    if (_search.isNotEmpty)
+                                    if (_searchController.text.isNotEmpty)
                                       GestureDetector(
                                         onTap: () {
                                           _searchController.clear();
-                                          setState(() => _search = '');
+                                          _search = '';
+                                          _loadFirstPage();
                                         },
                                         child: AppIcon('x', size: 16, color: ThemeColors.textMuted(dark)),
                                       ),
@@ -328,22 +408,44 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                           }
 
                           if (item == 'empty') {
-                            return Container(
-                              padding: const EdgeInsets.all(36),
-                              decoration: BoxDecoration(
-                                color: ThemeColors.card(dark),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: ThemeColors.border(dark)),
-                              ),
-                              child: Column(
-                                children: [
-                                  AppIcon('inbox', size: 40, color: ThemeColors.textMuted(dark)),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'No transactions found for this month',
-                                    style: TextStyle(color: ThemeColors.textMuted(dark), fontSize: 13),
-                                  ),
-                                ],
+                            return _RichEmptyState(
+                              dark: dark,
+                              monthLabel: _monthLabel(_monthKey),
+                              hasSearch: _search.trim().isNotEmpty || _filter != 'semua',
+                              onAdd: () {
+                                if (widget.onAddTransaction != null) {
+                                  widget.onAddTransaction!();
+                                } else {
+                                  AddTransactionScreen.show(context);
+                                }
+                              },
+                              onClearFilter: () {
+                                _searchController.clear();
+                                _triggerFilterChange(() {
+                                  _search = '';
+                                  _filter = 'semua';
+                                });
+                              },
+                            );
+                          }
+
+                          if (item is String && item == 'load_more') {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
+                                child: _isLoadingMore
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : Text(
+                                        'Showing ${_items.length} of $_total — scroll for more',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: ThemeColors.textMuted(dark),
+                                        ),
+                                      ),
                               ),
                             );
                           }
@@ -679,6 +781,124 @@ class _TxRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Richer empty state with illustration + prominent CTA so users
+/// don't have to hunt for the floating action button.
+class _RichEmptyState extends StatelessWidget {
+  final bool dark;
+  final String monthLabel;
+  final bool hasSearch;
+  final VoidCallback onAdd;
+  final VoidCallback onClearFilter;
+
+  const _RichEmptyState({
+    required this.dark,
+    required this.monthLabel,
+    required this.hasSearch,
+    required this.onAdd,
+    required this.onClearFilter,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ThemeColors.accentExpense(dark);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+      decoration: BoxDecoration(
+        color: ThemeColors.card(dark),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: ThemeColors.border(dark)),
+      ),
+      child: Column(
+        children: [
+          // Illustration: layered circles + icon
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 110,
+                height: 110,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  hasSearch ? Icons.search_off_rounded : Icons.receipt_long_rounded,
+                  size: 28,
+                  color: accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            hasSearch ? 'No matching transactions' : 'No transactions in $monthLabel',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: ThemeColors.textPrimary(dark),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hasSearch
+                ? 'Try a different keyword or clear your filters to see more results.'
+                : 'Start tracking your money by adding your first expense or income for this month.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              color: ThemeColors.textMuted(dark),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: hasSearch ? onClearFilter : onAdd,
+              icon: Icon(hasSearch ? Icons.filter_alt_off_rounded : Icons.add_rounded, size: 18),
+              label: Text(
+                hasSearch ? 'Clear Search & Filters' : 'Add Your First Transaction',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+              ),
+            ),
+          ),
+          if (!hasSearch) ...[
+            const SizedBox(height: 8),
+            Text(
+              'It only takes a few seconds ✨',
+              style: TextStyle(fontSize: 11, color: ThemeColors.textMuted(dark)),
+            ),
+          ],
+        ],
       ),
     );
   }

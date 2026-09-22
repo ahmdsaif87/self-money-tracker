@@ -215,6 +215,7 @@ class _HomeShellState extends State<HomeShell> {
         body = TransactionsScreen(
           key: const ValueKey('transactions'),
           onOpenTransaction: (tx) => _openAddTransaction(tx),
+          onAddTransaction: () => _openAddTransaction(),
         );
         break;
       case TabType.reports:

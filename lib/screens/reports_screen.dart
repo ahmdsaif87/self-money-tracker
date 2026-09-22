@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../stores/transaction_store.dart';
-import '../stores/category_store.dart';
 import '../stores/theme_store.dart';
 import '../theme/theme.dart';
 import '../components/app_icon.dart';
@@ -10,6 +9,7 @@ import '../components/section_label.dart';
 import '../components/sheet_drag.dart' show hexColor;
 import '../components/skeleton.dart';
 import '../utils/amount.dart';
+import 'add_transaction_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   final VoidCallback onOpenChat;
@@ -20,20 +20,84 @@ class ReportsScreen extends StatefulWidget {
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
+typedef _CatTotal = ({String name, double amount, String type, String color, String icon});
+typedef _Trend = ({String key, String label, double income, double expense});
+
 class _ReportsScreenState extends State<ReportsScreen> {
   String _monthKey = _currentMonthKey();
   String _chartType = 'expense'; // 'expense' or 'income'
   int _touchedPieIndex = -1;
+
+  // SQL-side state: no full-table load, no Dart fold over all rows.
+  double _income = 0;
+  double _expense = 0;
+  List<_CatTotal> _expenseCats = [];
+  List<_CatTotal> _incomeCats = [];
+  List<_Trend> _trends = [];
+  bool _isLoading = true;
+  int _requestId = 0;
 
   static String _currentMonthKey() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}';
   }
 
+  @override
+  void initState() {
+    super.initState();
+    TransactionStore.instance.addListener(_onStoreChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    TransactionStore.instance.removeListener(_onStoreChanged);
+    super.dispose();
+  }
+
+  void _onStoreChanged() => _load();
+
+  Future<void> _load() async {
+    final id = ++_requestId;
+    final monthKey = _monthKey;
+    // Keep old numbers on screen while refreshing (no skeleton flash).
+    try {
+      final store = TransactionStore.instance;
+      final results = await Future.wait([
+        store.monthlySummary(monthKey),
+        store.categoryBreakdown(monthKey, 'expense'),
+        store.categoryBreakdown(monthKey, 'income'),
+        store.monthlyTrends(monthKey, 6),
+      ]);
+      if (!mounted || id != _requestId) return;
+      final summary = results[0] as ({double income, double expense});
+      final expCats =
+          results[1] as List<({String key, String name, double amount, String type, String color, String icon})>;
+      final incCats =
+          results[2] as List<({String key, String name, double amount, String type, String color, String icon})>;
+      final trends = results[3] as List<({String key, double income, double expense})>;
+      setState(() {
+        _income = summary.income;
+        _expense = summary.expense;
+        _expenseCats = [for (final c in expCats) (name: c.name, amount: c.amount, type: c.type, color: c.color, icon: c.icon)];
+        _incomeCats = [for (final c in incCats) (name: c.name, amount: c.amount, type: c.type, color: c.color, icon: c.icon)];
+        _trends = [for (final t in trends) (key: t.key, label: _monthShortLabel(t.key), income: t.income, expense: t.expense)];
+        _touchedPieIndex = -1;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted && id == _requestId) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _pickMonth(BuildContext context) async {
     final picked = await showMonthPickerDialog(context, _monthKey);
     if (picked != null && mounted) {
-      setState(() => _monthKey = picked);
+      setState(() {
+        _monthKey = picked;
+        _isLoading = _trends.isEmpty;
+      });
+      await _load();
     }
   }
 
@@ -55,79 +119,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return shortNames[m - 1];
   }
 
-  List<String> _getLast6MonthKeys(String currentKey) {
-    final parts = currentKey.split('-');
-    final y = int.parse(parts[0]);
-    final m = int.parse(parts[1]);
-    final result = <String>[];
-    for (int i = 5; i >= 0; i--) {
-      final dt = DateTime(y, m - i, 1);
-      result.add('${dt.year}-${dt.month.toString().padLeft(2, '0')}');
-    }
-    return result;
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: ThemeStore.instance,
       builder: (context, _) {
-        return ListenableBuilder(
-          listenable: TransactionStore.instance,
-          builder: (context, _) {
-            return ListenableBuilder(
-              listenable: CategoryStore.instance,
-              builder: (context, _) {
                 final dark = ThemeStore.instance.isDarkMode;
-                final all = TransactionStore.instance.transactions;
-                final categories = CategoryStore.instance.categories;
-
-                final catMap = <String, dynamic>{for (final c in categories) c.id: c};
-                final inMonth = all.where((t) => t.date.startsWith(_monthKey)).toList();
-
-                final income = inMonth
-                    .where((t) => t.type == 'income')
-                    .fold<double>(0, (s, t) => s + t.amount);
-                final expense = inMonth
-                    .where((t) => t.type == 'expense')
-                    .fold<double>(0, (s, t) => s + t.amount);
+                final income = _income;
+                final expense = _expense;
                 final net = income - expense;
 
-                final byCat = <String, ({String name, double amount, String type, String color, String icon})>{};
-                for (final tx in inMonth) {
-                  if (tx.type == 'transfer') continue;
-                  final cat = tx.categoryId != null ? catMap[tx.categoryId] : null;
-                  final name = cat?.name ?? 'Uncategorized';
-                  final color = cat?.color ?? '#E06D53';
-                  final icon = cat?.icon ?? 'tag';
-                  final ckey = tx.categoryId ?? 'none';
-                  final cur = byCat[ckey] ?? (name: name, amount: 0.0, type: tx.type, color: color, icon: icon);
-                  byCat[ckey] = (
-                    name: name,
-                    amount: cur.amount + tx.amount,
-                    type: tx.type,
-                    color: color,
-                    icon: icon,
-                  );
-                }
-
-                final catList = byCat.values.toList()..sort((a, b) => b.amount.compareTo(a.amount));
-                final expenseCats = catList.where((c) => c.type == 'expense').toList();
-                final incomeCats = catList.where((c) => c.type == 'income').toList();
+                final expenseCats = _expenseCats;
+                final incomeCats = _incomeCats;
 
                 final activeCats = _chartType == 'expense' ? expenseCats : incomeCats;
                 final activeTotal = _chartType == 'expense' ? expense : income;
 
-                // 6-Month Historical Data calculation
-                final last6Keys = _getLast6MonthKeys(_monthKey);
-                final monthlyTrends = last6Keys.map((mKey) {
-                  final txs = all.where((t) => t.date.startsWith(mKey)).toList();
-                  final inc = txs.where((t) => t.type == 'income').fold<double>(0, (s, t) => s + t.amount);
-                  final exp = txs.where((t) => t.type == 'expense').fold<double>(0, (s, t) => s + t.amount);
-                  return (key: mKey, label: _monthShortLabel(mKey), income: inc, expense: exp);
-                }).toList();
+                // 6-month trend comes from a single SQL GROUP BY (see _load).
+                final monthlyTrends = _trends;
 
-                if (TransactionStore.instance.isLoading && all.isEmpty) {
+                if (_isLoading && monthlyTrends.isEmpty) {
                   return Scaffold(
                     backgroundColor: ThemeColors.bg(dark),
                     body: const SafeArea(child: SkeletonList(rows: 5)),
@@ -525,10 +536,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ),
                   ),
                 );
-              },
-            );
-          },
-        );
       },
     );
   }
@@ -543,14 +550,60 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _emptyBox(bool dark, String msg) {
+    final isExpense = msg.toLowerCase().contains('expense');
+    final accent = isExpense ? ThemeColors.accentExpense(dark) : ThemeColors.accentIncome(dark);
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
       decoration: BoxDecoration(
         color: ThemeColors.secondaryCard(dark),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: ThemeColors.border(dark).withValues(alpha: 0.6)),
       ),
-      child: Center(
-        child: Text(msg, style: TextStyle(color: ThemeColors.textMuted(dark), fontSize: 13)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isExpense ? Icons.shopping_bag_outlined : Icons.savings_outlined,
+              size: 26,
+              color: accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            msg,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: ThemeColors.textPrimary(dark),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Add a transaction to see your breakdown chart here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: ThemeColors.textMuted(dark), fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: () => AddTransactionScreen.show(context),
+            icon: const Icon(Icons.add_rounded, size: 16),
+            label: const Text('Add Transaction', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: accent,
+              side: BorderSide(color: accent.withValues(alpha: 0.5)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+          ),
+        ],
       ),
     );
   }

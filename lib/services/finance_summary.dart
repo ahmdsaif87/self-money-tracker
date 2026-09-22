@@ -31,42 +31,45 @@ class FinancialSummary {
 class FinanceSummaryService {
   static Future<FinancialSummary> buildFinancialSummary({int monthCount = 3}) async {
     final db = DB.instance.db;
+    // Accounts table is tiny (a handful of rows) — direct query is fine.
     final accRows = await db.query('accounts');
-    final catRows = await db.query('categories');
-    final txRows = await db.query('transactions');
-
     final accList = accRows.map(Account.fromMap).toList();
-    final catList = catRows.map(Category.fromMap).toList();
-    final txList = txRows.map(Transaction.fromMap).toList();
-
-    final catMap = <String, Category>{for (final c in catList) c.id: c};
 
     final totalBalance = accList.fold<double>(0, (sum, a) => sum + a.balance);
 
+    // All transaction math happens in SQLite (SUM + GROUP BY per month).
+    // Months are fetched concurrently; each month = 3 small aggregate queries.
     final now = DateTime.now();
-    final months = <MonthlySummary>[];
+    final keys = <String>[];
     for (var i = monthCount - 1; i >= 0; i--) {
       final d = DateTime(now.year, now.month - i, 1);
-      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-      final inMonth = txList.where((tx) => tx.date.startsWith(key)).toList();
-
-      final income = inMonth.where((tx) => tx.type == 'income').fold<double>(0, (s, tx) => s + tx.amount);
-      final expense = inMonth.where((tx) => tx.type == 'expense').fold<double>(0, (s, tx) => s + tx.amount);
-
-      final byCat = <String, ({String name, double amount, String type})>{};
-      for (final tx in inMonth) {
-        if (tx.type == 'transfer') continue;
-        final name = tx.categoryId != null
-            ? (catMap[tx.categoryId]?.name ?? 'Tanpa kategori')
-            : 'Tanpa kategori';
-        final keyCat = tx.categoryId ?? 'none';
-        final cur = byCat[keyCat] ?? (name: name, amount: 0.0, type: tx.type);
-        byCat[keyCat] = (name: cur.name, amount: cur.amount + tx.amount, type: tx.type);
-      }
-
-      final list = byCat.values.toList()..sort((a, b) => b.amount.compareTo(a.amount));
-      months.add(MonthlySummary(month: key, income: income, expense: expense, byCategory: list));
+      keys.add('${d.year}-${d.month.toString().padLeft(2, '0')}');
     }
+    final months = await Future.wait(keys.map((key) async {
+      final results = await Future.wait([
+        DB.instance.fetchMonthlySummary(key),
+        DB.instance.fetchCategoryBreakdown(key, 'expense'),
+        DB.instance.fetchCategoryBreakdown(key, 'income'),
+      ]);
+      final summary = results[0] as ({double income, double expense});
+      final expCats = results[1]
+          as List<({String key, String name, double amount, String type, String color, String icon})>;
+      final incCats = results[2]
+          as List<({String key, String name, double amount, String type, String color, String icon})>;
+      // Both breakdowns arrive pre-sorted DESC by amount; merge preserving order.
+      // Keep the legacy 'Tanpa kategori' label for uncategorized rows.
+      String label(String name) => name == 'Uncategorized' ? 'Tanpa kategori' : name;
+      final merged = <({String name, double amount, String type})>[
+        for (final c in expCats) (name: label(c.name), amount: c.amount, type: c.type),
+        for (final c in incCats) (name: label(c.name), amount: c.amount, type: c.type),
+      ]..sort((a, b) => b.amount.compareTo(a.amount));
+      return MonthlySummary(
+        month: key,
+        income: summary.income,
+        expense: summary.expense,
+        byCategory: merged,
+      );
+    }));
 
     return FinancialSummary(
       totalBalance: totalBalance,

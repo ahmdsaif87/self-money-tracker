@@ -174,38 +174,31 @@ class AITools {
   }
 
   static Future<Map<String, dynamic>> _searchTransactions(Map<String, dynamic> args) async {
-    final keyword = (args['keyword'] as String?)?.toLowerCase() ?? '';
-    final limit = (args['limit'] as num?)?.toInt() ?? 10;
-    
-    await TransactionStore.instance.fetchTransactions();
+    final keyword = (args['keyword'] as String?) ?? '';
+    final limit = ((args['limit'] as num?)?.toInt() ?? 10).clamp(1, 50);
+
+    // SQL-side search with LIMIT — no full-table load into memory.
+    final txs = await TransactionStore.instance.searchTransactions(keyword, limit: limit);
+    final totalMatches = await TransactionStore.instance.countSearchTransactions(keyword);
     await CategoryStore.instance.fetchCategories();
-    final categories = CategoryStore.instance.categories;
-    var txs = TransactionStore.instance.transactions;
-    
-    if (keyword.isNotEmpty) {
-      txs = txs.where((tx) {
-        final noteMatch = tx.note?.toLowerCase().contains(keyword) ?? false;
-        final cat = categories.where((c) => c.id == tx.categoryId).firstOrNull;
-        final catMatch = cat?.name.toLowerCase().contains(keyword) ?? false;
-        return noteMatch || catMatch;
-      }).toList();
-    }
-    
-    final result = txs.take(limit).map((tx) {
-      final cat = categories.where((c) => c.id == tx.categoryId).firstOrNull;
+    final catMap = <String, Category>{
+      for (final c in CategoryStore.instance.categories) c.id: c,
+    };
+
+    final result = txs.map((tx) {
       return {
         'date': tx.date,
         'type': tx.type,
         'amount': tx.amount,
-        'category': cat?.name,
+        'category': tx.categoryId != null ? catMap[tx.categoryId]?.name : null,
         'note': tx.note,
       };
     }).toList();
-    
+
     return {
       'results': result,
       'count': result.length,
-      'total_matches': txs.length,
+      'total_matches': totalMatches,
     };
   }
 
@@ -454,31 +447,20 @@ class AITools {
       return {'error': 'start_date and end_date are required'};
     }
 
-    await TransactionStore.instance.fetchTransactions();
-    await CategoryStore.instance.fetchCategories();
-    final categories = CategoryStore.instance.categories;
-    final catMap = <String, Category>{for (final c in categories) c.id: c};
-    final txs = TransactionStore.instance.transactions;
+    // SQL-side aggregations — no full-table load into memory.
+    final store = TransactionStore.instance;
+    final summary = await store.summaryByDateRange(startDateStr, endDateStr);
+    final breakdown = await store.categoryBreakdownByDateRange(startDateStr, endDateStr);
 
-    double income = 0;
-    double expense = 0;
-    final byCat = <String, ({String name, double amount, String type})>{};
-
-    for (final tx in txs) {
-      if (tx.date.compareTo(startDateStr) >= 0 && tx.date.compareTo(endDateStr) <= 0) {
-        if (tx.type == 'income') income += tx.amount;
-        if (tx.type == 'expense') expense += tx.amount;
-
-        if (tx.type != 'transfer') {
-          final name = tx.categoryId != null ? (catMap[tx.categoryId]?.name ?? 'Tanpa kategori') : 'Tanpa kategori';
-          final keyCat = tx.categoryId ?? 'none';
-          final cur = byCat[keyCat] ?? (name: name, amount: 0.0, type: tx.type);
-          byCat[keyCat] = (name: cur.name, amount: cur.amount + tx.amount, type: tx.type);
-        }
-      }
-    }
-
-    final list = byCat.values.toList()..sort((a, b) => b.amount.compareTo(a.amount));
+    final income = summary.income;
+    final expense = summary.expense;
+    final list = breakdown
+        .map((c) => (
+              name: c.name == 'Uncategorized' ? 'Tanpa kategori' : c.name,
+              amount: c.amount,
+              type: c.type,
+            ))
+        .toList();
 
     return {
       'start_date': startDateStr,

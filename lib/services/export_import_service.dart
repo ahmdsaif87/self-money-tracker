@@ -69,6 +69,7 @@ class ExportImportService {
 
       await AccountStore.instance.fetchAccounts();
       await CategoryStore.instance.fetchCategories();
+      TransactionStore.instance.invalidateMonthCache();
       await TransactionStore.instance.fetchTransactions();
 
       return (

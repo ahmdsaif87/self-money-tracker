@@ -64,8 +64,61 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (_date.millisecondsSinceEpoch == 0) _date = DateTime.now();
     } else {
       final accs = AccountStore.instance.accounts;
-      if (accs.isNotEmpty) _selectedAccountId = accs.first.id;
+      if (accs.isNotEmpty) {
+        _selectedAccountId = accs.first.id;
+        if (accs.length == 2) {
+          _toAccountId = accs.firstWhere((a) => a.id != _selectedAccountId).id;
+        }
+      }
     }
+  }
+
+  void _autoFillToAccount() {
+    if (_type != 'transfer') return;
+    if (_toAccountId != null && _toAccountId != _selectedAccountId) return;
+    final accs = AccountStore.instance.accounts;
+    final other = accs.where((a) => a.id != _selectedAccountId).toList();
+    if (other.isNotEmpty) {
+      _toAccountId = other.first.id;
+    } else {
+      _toAccountId = null;
+    }
+  }
+
+  void _swapAccounts() {
+    setState(() {
+      final tmp = _selectedAccountId;
+      _selectedAccountId = _toAccountId;
+      _toAccountId = tmp;
+    });
+  }
+
+  void _onTypeChanged(String value) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _type = value;
+      _selectedCategoryId = null;
+      if (value == 'transfer') {
+        _toAccountId = null;
+        _autoFillToAccount();
+      } else {
+        _toAccountId = null;
+      }
+    });
+  }
+
+  void _onFromAccountChanged(String? val) {
+    setState(() {
+      // If new From equals current To, swap instead of creating invalid state.
+      if (_type == 'transfer' && val == _toAccountId) {
+        final tmp = _selectedAccountId;
+        _selectedAccountId = val;
+        _toAccountId = tmp;
+      } else {
+        _selectedAccountId = val;
+        _autoFillToAccount();
+      }
+    });
   }
 
   @override
@@ -172,14 +225,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final isSelected = _type == value;
     return Expanded(
       child: GestureDetector(
-        onTap: () {
-          FocusScope.of(context).unfocus();
-          setState(() {
-            _type = value;
-            _selectedCategoryId = null;
-            _toAccountId = null;
-          });
-        },
+        onTap: () => _onTypeChanged(value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -324,33 +370,99 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   selectedValue: _selectedAccountId,
                   items: accountPickerItems,
                   placeholder: 'Select Account',
-                  onChanged: (val) => setState(() => _selectedAccountId = val),
+                  onChanged: _onFromAccountChanged,
                 ),
-                const SizedBox(height: 12),
-
-                // Transfer To Account (if type is transfer)
-                if (_type == 'transfer') ...[
-                  AppPickerField<String>(
-                    label: 'To Account',
-                    selectedValue: _toAccountId,
-                    items: accountPickerItems.where((a) => a.id != _selectedAccountId).toList(),
-                    placeholder: 'Select Destination Account',
-                    onChanged: (val) => setState(() => _toAccountId = val),
+                // Animated transfer / category section — smoothly expands instead of jumping.
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.topCenter,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    transitionBuilder: (child, animation) {
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SizeTransition(
+                          sizeFactor: animation,
+                          axisAlignment: -1.0,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _type == 'transfer'
+                        ? Column(
+                            key: const ValueKey('transfer-fields'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Swap direction row
+                              Row(
+                                children: [
+                                  const Expanded(child: Divider(height: 24)),
+                                  Material(
+                                    color: ThemeColors.accentWarning(dark).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(20),
+                                      onTap: (_selectedAccountId != null && _toAccountId != null)
+                                          ? _swapAccounts
+                                          : null,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.swap_vert_rounded,
+                                              size: 16,
+                                              color: ThemeColors.accentWarning(dark),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'Swap',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: ThemeColors.accentWarning(dark),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const Expanded(child: Divider(height: 24)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              AppPickerField<String>(
+                                label: 'To Account',
+                                selectedValue: _toAccountId,
+                                items: accountPickerItems.where((a) => a.id != _selectedAccountId).toList(),
+                                placeholder: 'Select Destination Account',
+                                onChanged: (val) => setState(() => _toAccountId = val),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                          )
+                        : Column(
+                            key: const ValueKey('category-fields'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SizedBox(height: 12),
+                              AppPickerField<String>(
+                                label: 'Category',
+                                selectedValue: _selectedCategoryId,
+                                items: categoryPickerItems,
+                                placeholder: 'Select Category',
+                                onChanged: (val) => setState(() => _selectedCategoryId = val),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                          ),
                   ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Category Selector (if type is not transfer)
-                if (_type != 'transfer') ...[
-                  AppPickerField<String>(
-                    label: 'Category',
-                    selectedValue: _selectedCategoryId,
-                    items: categoryPickerItems,
-                    placeholder: 'Select Category',
-                    onChanged: (val) => setState(() => _selectedCategoryId = val),
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                ),
 
                 // Custom Date Picker Field
                 Column(

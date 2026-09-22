@@ -378,7 +378,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   : null;
                               final isIncome = tx.type == 'income';
                               final isTransfer = tx.type == 'transfer';
-                              final color = isTransfer
+                              final color = cat != null
+                                  ? hexColor(cat.color)
+                                  : isTransfer
                                   ? ThemeColors.accentWarning(dark)
                                   : isIncome
                                   ? ThemeColors.accentIncome(dark)

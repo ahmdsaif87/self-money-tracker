@@ -8,6 +8,7 @@ import '../theme/theme.dart';
 import '../components/app_icon.dart';
 import '../components/month_picker.dart';
 import '../components/skeleton.dart';
+import '../components/sheet_drag.dart' show hexColor;
 import '../utils/amount.dart';
 import '../utils/date.dart';
 
@@ -353,7 +354,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                             final txs = groups[dateKey]!;
                             final dayTotal = txs.fold<double>(
                               0,
-                              (s, t) => s + (t.type == 'income' ? t.amount : -t.amount),
+                              (s, t) => s + (t.type == 'income' ? t.amount : t.type == 'transfer' ? 0 : -t.amount),
                             );
                             
                             return Padding(
@@ -574,12 +575,14 @@ class _TxRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isIncome = tx.type == 'income';
     final isTransfer = tx.type == 'transfer';
-    final color = isTransfer
+    final cat = tx.categoryId != null ? catMap[tx.categoryId] : null;
+    final color = cat != null
+        ? hexColor(cat.color)
+        : isTransfer
         ? ThemeColors.accentWarning(dark)
         : isIncome
         ? ThemeColors.accentIncome(dark)
         : ThemeColors.accentExpense(dark);
-    final cat = tx.categoryId != null ? catMap[tx.categoryId] : null;
     final icon = isTransfer ? 'arrow-right-left' : (cat?.icon ?? 'tag');
     final label = isTransfer
         ? 'Transfer'

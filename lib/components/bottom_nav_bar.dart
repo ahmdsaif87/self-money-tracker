@@ -43,7 +43,7 @@ class BottomNavBar extends StatelessWidget {
           bottom: bottomMargin,
           child: Align(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 color: barBg,
                 borderRadius: BorderRadius.circular(999),
@@ -56,7 +56,7 @@ class BottomNavBar extends StatelessWidget {
                   ),
                 ],
               ),
-              constraints: const BoxConstraints(maxWidth: 380),
+              constraints: const BoxConstraints(maxWidth: 420),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: _tabs.map((tab) {
@@ -65,9 +65,9 @@ class BottomNavBar extends StatelessWidget {
                     return GestureDetector(
                       onTap: () => onSelectTab(TabType.add),
                       child: Container(
-                        width: 44,
-                        height: 44,
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 56,
+                        height: 56,
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
                         decoration: BoxDecoration(
                           color: const Color(0xFFE06D53),
                           shape: BoxShape.circle,
@@ -86,7 +86,7 @@ class BottomNavBar extends StatelessWidget {
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 220),
                         curve: Curves.easeOutCubic,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         decoration: BoxDecoration(
                           color: isActive ? activePill : Colors.transparent,
                           borderRadius: BorderRadius.circular(999),
